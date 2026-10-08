@@ -464,3 +464,85 @@ test.describe('Auth — Sign out', () => {
     expect(cookiesAfterSignOut.some((cookie) => cookie.name === 'access_token')).toBe(false);
   });
 });
+
+
+test.describe('Auth — Transient session failures', () => {
+  const sessionUser = {
+    id: 1, email: 'adopter-e2e@example.com', first_name: 'Carlos', last_name: 'Pérez',
+    role: 'adopter', is_staff: false,
+  };
+
+  test('recovers a session after a transient refresh failure', { tag: [...AUTH_SESSION_PERSISTENCE, '@outcome:failure'] }, async ({ page, context }) => {
+    await context.addCookies([
+      { name: 'access_token', value: 'expired-access', url: process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:3000' },
+      { name: 'refresh_token', value: 'valid-refresh', url: process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:3000' },
+    ]);
+    await page.route('**/api/**', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ preferences: [], unread_count: 0 }) }),
+    );
+    await page.route('**/api/auth/validate_token/**', (route) =>
+      route.fulfill({ status: 401, contentType: 'application/json', body: JSON.stringify({ detail: 'Token expired' }) }),
+    );
+    await page.route('**/api/token/refresh/**', (route) =>
+      route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ detail: 'Temporarily unavailable' }) }),
+    );
+
+    const failedRefresh = page.waitForResponse((response) => response.url().includes('/token/refresh/') && response.status() === 503);
+    await page.goto('/my-profile/notifications');
+    await (await failedRefresh).finished();
+    await page.getByRole('button', { name: 'Abrir menú de cuenta' }).filter({ visible: true }).click();
+    await expect(page.getByRole('menuitem', { name: 'Salir' })).toBeVisible();
+    await expect(page).toHaveURL(/\/my-profile\/notifications/);
+    const retainedCookies = await context.cookies();
+    expect(retainedCookies.find((cookie) => cookie.name === 'access_token')?.value).toBe('expired-access');
+    expect(retainedCookies.find((cookie) => cookie.name === 'refresh_token')?.value).toBe('valid-refresh');
+
+    await page.unroute('**/api/auth/validate_token/**');
+    await page.route('**/api/auth/validate_token/**', (route) => {
+      const authorized = route.request().headers()['authorization'] === 'Bearer recovered-access';
+      return route.fulfill({
+        status: authorized ? 200 : 401,
+        contentType: 'application/json',
+        body: JSON.stringify(authorized ? { user: sessionUser } : { detail: 'Token expired' }),
+      });
+    });
+    await page.unroute('**/api/token/refresh/**');
+    await page.route('**/api/token/refresh/**', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ access: 'recovered-access' }) }),
+    );
+    const recoveredValidation = page.waitForResponse((response) => response.url().includes('/auth/validate_token/') && response.status() === 200);
+    await page.reload();
+    await (await recoveredValidation).finished();
+
+    await page.getByRole('button', { name: 'Abrir menú de cuenta' }).filter({ visible: true }).click();
+    await expect(page.getByRole('menuitem', { name: 'Salir' })).toBeVisible();
+    await expect(page).toHaveURL(/\/my-profile\/notifications/);
+    const recoveredCookies = await context.cookies();
+    expect(recoveredCookies.find((cookie) => cookie.name === 'access_token')?.value).toBe('recovered-access');
+    expect(recoveredCookies.find((cookie) => cookie.name === 'refresh_token')?.value).toBe('valid-refresh');
+  });
+
+  test('ends a session after a definitive refresh rejection', { tag: [...AUTH_PROTECTED_REDIRECT, '@outcome:error'] }, async ({ page, context }) => {
+    await context.addCookies([
+      { name: 'access_token', value: 'expired-access', url: process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:3000' },
+      { name: 'refresh_token', value: 'invalid-refresh', url: process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:3000' },
+    ]);
+    await page.route('**/api/**', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ preferences: [], unread_count: 0 }) }),
+    );
+    await page.route('**/api/auth/validate_token/**', (route) =>
+      route.fulfill({ status: 401, contentType: 'application/json', body: JSON.stringify({ detail: 'Token expired' }) }),
+    );
+    await page.route('**/api/token/refresh/**', (route) =>
+      route.fulfill({ status: 401, contentType: 'application/json', body: JSON.stringify({ detail: 'Refresh token invalid' }) }),
+    );
+
+    const rejectedRefresh = page.waitForResponse((response) => response.url().includes('/token/refresh/') && response.status() === 401);
+    await page.goto('/my-profile/notifications');
+    await (await rejectedRefresh).finished();
+    await expect(page).toHaveURL(/\/sign-in/);
+    const remainingCookies = await context.cookies();
+    expect(remainingCookies.some((cookie) => cookie.name === 'access_token')).toBe(false);
+    expect(remainingCookies.some((cookie) => cookie.name === 'refresh_token')).toBe(false);
+  });
+});
