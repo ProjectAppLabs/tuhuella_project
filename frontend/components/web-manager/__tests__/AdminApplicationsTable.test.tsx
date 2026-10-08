@@ -1,6 +1,6 @@
 import React from 'react';
 import { describe, it, expect } from '@jest/globals';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 
 import AdminApplicationsTable from '../AdminApplicationsTable';
 import type { AdoptionApplication } from '@/lib/types';
@@ -32,12 +32,14 @@ describe('AdminApplicationsTable', () => {
 
   it('shows empty state when items is empty and not loading', () => {
     render(<AdminApplicationsTable items={[]} />);
+    expect(screen.getByText('No hay solicitudes.')).toBeInTheDocument();
     expect(screen.queryByRole('table')).not.toBeInTheDocument();
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
 
   it('renders a table row per application', () => {
     render(<AdminApplicationsTable items={[buildApp(), buildApp({ id: 2, animal_name: 'Luna' })]} />);
+    expect(screen.getAllByRole('row')).toHaveLength(3);
     expect(screen.getByRole('cell', { name: 'Firulais' })).toBeInTheDocument();
     expect(screen.getByRole('cell', { name: 'Luna' })).toBeInTheDocument();
   });
@@ -54,6 +56,7 @@ describe('AdminApplicationsTable', () => {
 
   it('hides shelter column when showShelter is false', () => {
     render(<AdminApplicationsTable items={[buildApp()]} showShelter={false} />);
+    expect(screen.getByRole('cell', { name: 'Firulais' })).toBeInTheDocument();
     expect(screen.queryByRole('cell', { name: 'Happy Paws' })).not.toBeInTheDocument();
   });
 
@@ -108,5 +111,30 @@ describe('AdminApplicationsTable', () => {
     render(<AdminApplicationsTable items={[buildApp()]} showShelter={false} />);
     const headers = screen.getAllByRole('columnheader').map((h) => h.textContent);
     expect(headers).toHaveLength(4);
+  });
+
+  it('links each application to its own detail once', () => {
+    render(<AdminApplicationsTable items={[buildApp(), buildApp({ id: 2, animal_name: 'Luna' })]} />);
+    expect(screen.getAllByRole('link')).toHaveLength(2);
+    expect(screen.getByRole('link', { name: 'Firulais' })).toHaveAttribute('href', '/web-manager/applications/1');
+    expect(screen.getByRole('link', { name: 'Luna' })).toHaveAttribute('href', '/web-manager/applications/2');
+  });
+
+  it('preserves the logical field order for each application', () => {
+    render(<AdminApplicationsTable items={[buildApp()]} />);
+    const row = screen.getByRole('row', { name: /Firulais/ });
+    expect(within(row).getAllByRole('cell').map((cell) => cell.textContent)).toEqual([
+      'AnimalFirulais', 'RefugioHappy Paws', 'Solicitanteana@example.com', 'EstadoEnviada', 'Recibida10/4/2026',
+    ]);
+  });
+
+  it('preserves long application values', () => {
+    const animalName = 'AnimalConUnNombreSinEspaciosQueDebePermanecerCompleto';
+    const shelterName = 'RefugioConUnNombreSinEspaciosQueDebePermanecerCompleto';
+    const email = 'solicitante.con.un.correo.muy.largo@un-dominio-de-prueba.example.com';
+    render(<AdminApplicationsTable items={[buildApp({ animal_name: animalName, shelter_name: shelterName, user_email: email })]} />);
+    expect(screen.getByRole('link', { name: animalName })).toHaveTextContent(animalName);
+    expect(screen.getByRole('cell', { name: shelterName })).toBeInTheDocument();
+    expect(screen.getByRole('cell', { name: email })).toBeInTheDocument();
   });
 });
