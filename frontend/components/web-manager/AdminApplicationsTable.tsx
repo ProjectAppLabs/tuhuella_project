@@ -39,10 +39,12 @@ export default function AdminApplicationsTable({
   }
 
   return (
-    <div className="overflow-x-auto rounded-2xl border border-border-primary bg-surface-primary">
-      <table className="min-w-full text-sm">
-        <thead className="bg-surface-secondary">
-          <tr className="text-left text-xs uppercase tracking-wide text-text-quaternary">
+    <div className="min-w-0 lg:rounded-2xl lg:border lg:border-border-primary lg:bg-surface-primary">
+      {/* Keep one copy of each record when rows become cards below lg. Explicit
+          roles preserve table semantics when CSS changes the native displays. */}
+      <table role="table" aria-label={t('applicationsTitle')} className="block w-full text-sm lg:table lg:table-fixed">
+        <thead role="rowgroup" className="sr-only bg-surface-secondary lg:not-sr-only lg:table-header-group">
+          <tr role="row" className="text-left text-xs uppercase tracking-wide text-text-quaternary">
             <th scope="col" className="px-4 py-3">{t('tableAnimal')}</th>
             {showShelter && <th scope="col" className="px-4 py-3">{t('tableShelter')}</th>}
             <th scope="col" className="px-4 py-3">{t('tableApplicant')}</th>
@@ -50,25 +52,40 @@ export default function AdminApplicationsTable({
             <th scope="col" className="px-4 py-3">{t('tableCreatedAt')}</th>
           </tr>
         </thead>
-        <tbody>
+        <tbody role="rowgroup" className="grid gap-4 lg:table-row-group">
           {items.map((app) => (
-            <tr key={app.id} className="border-t border-border-tertiary hover:bg-surface-hover transition-colors">
-              <td className="px-4 py-3 font-medium text-text-primary">
+            <tr
+              key={app.id}
+              role="row"
+              className="grid min-w-0 rounded-2xl border border-border-primary bg-surface-primary transition-colors hover:bg-surface-hover lg:table-row lg:rounded-none lg:border-0 lg:border-t lg:border-border-tertiary"
+            >
+              <td role="cell" className="block min-w-0 px-4 py-3 font-medium text-text-primary lg:table-cell">
+                <span aria-hidden="true" className="mb-1 block text-xs text-text-quaternary lg:hidden">{t('tableAnimal')}</span>
                 <Link
                   href={ROUTES.WEB_MANAGER_APPLICATION_DETAIL(app.id)}
-                  className="hover:text-teal-600 transition-colors"
+                  className="inline-flex min-h-11 min-w-11 max-w-full items-center wrap-anywhere transition-colors hover:text-teal-600"
                 >
                   {app.animal_name}
                 </Link>
               </td>
-              {showShelter && <td className="px-4 py-3 text-text-secondary">{app.shelter_name ?? '—'}</td>}
-              <td className="px-4 py-3 text-text-secondary">{app.user_email}</td>
-              <td className="px-4 py-3">
+              {showShelter && (
+                <td role="cell" className="block min-w-0 px-4 py-3 wrap-anywhere text-text-secondary lg:table-cell">
+                  <span aria-hidden="true" className="mb-1 block text-xs text-text-quaternary lg:hidden">{t('tableShelter')}</span>
+                  {app.shelter_name ?? '—'}
+                </td>
+              )}
+              <td role="cell" className="block min-w-0 px-4 py-3 wrap-anywhere text-text-secondary lg:table-cell">
+                <span aria-hidden="true" className="mb-1 block text-xs text-text-quaternary lg:hidden">{t('tableApplicant')}</span>
+                {app.user_email}
+              </td>
+              <td role="cell" className="block min-w-0 px-4 py-3 lg:table-cell">
+                <span aria-hidden="true" className="mb-1 block text-xs text-text-quaternary lg:hidden">{t('tableStatus')}</span>
                 <span className={`inline-flex text-xs px-2 py-1 rounded-full ring-1 font-medium ${statusBadge[app.status]}`}>
                   {t(`status.${app.status}`)}
                 </span>
               </td>
-              <td className="px-4 py-3 text-text-tertiary">
+              <td role="cell" className="block min-w-0 px-4 py-3 text-text-tertiary lg:table-cell">
+                <span aria-hidden="true" className="mb-1 block text-xs text-text-quaternary lg:hidden">{t('tableCreatedAt')}</span>
                 {new Date(app.created_at).toLocaleDateString('es')}
               </td>
             </tr>
