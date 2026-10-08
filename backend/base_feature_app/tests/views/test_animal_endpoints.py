@@ -1,8 +1,223 @@
+"""API regressions for public animal lists and shelter-managed endpoints."""
+
 import pytest
 from django.urls import reverse
 from rest_framework import status
 
 from base_feature_app.models import Animal
+from base_feature_app.tests.factories import AnimalFactory, ShelterFactory
+
+CSV_FILTERS = ('species', 'size', 'age_range', 'gender', 'energy_level')
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('field', CSV_FILTERS)
+@pytest.mark.parametrize('value', ['', '   ', ' , , '])
+def test_animal_list_ignores_empty_csv_filters(api_client, animal, field, value):
+    """Fails if a blank CSV filter crashes or removes published animals."""
+    url = reverse('animal-list')
+    unfiltered_response = api_client.get(url)
+
+    response = api_client.get(url, {field: value})
+
+    assert response.status_code == status.HTTP_200_OK
+    assert response.json() == unfiltered_response.json()
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(('field', 'other_value', 'excluded_value'), [
+    ('species', 'cat', 'other'),
+    ('size', 'small', 'large'),
+    ('age_range', 'adult', 'senior'),
+    ('gender', 'male', 'unknown'),
+    ('energy_level', 'high', 'low'),
+])
+def test_animal_list_accepts_multiple_csv_values(
+    api_client, animal, field, other_value, excluded_value,
+):
+    """Fails if comma-separated choices lose a match or include another value."""
+    matching = AnimalFactory(shelter=animal.shelter, **{field: other_value})
+    AnimalFactory(shelter=animal.shelter, **{field: excluded_value})
+    values = f' {getattr(animal, field)} , , {other_value}, '
+
+    response = api_client.get(reverse('animal-list'), {field: values})
+
+    assert response.status_code == status.HTTP_200_OK
+    assert {row['id'] for row in response.json()['results']} == {animal.pk, matching.pk}
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('field', CSV_FILTERS)
+def test_animal_list_returns_no_matches_for_unknown_csv_value(api_client, animal, field):
+    """Fails if unknown filter values are ignored instead of matching no animals."""
+    response = api_client.get(reverse('animal-list'), {field: 'not-a-choice'})
+
+    assert response.status_code == status.HTTP_200_OK
+    assert response.json()['count'] == 0
+    assert response.json()['results'] == []
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('field', CSV_FILTERS)
+def test_animal_list_retains_valid_csv_value_beside_unknown(api_client, animal, field):
+    """Fails if an unknown choice rejects an otherwise matching CSV filter."""
+    response = api_client.get(
+        reverse('animal-list'), {field: f'{getattr(animal, field)},not-a-choice'},
+    )
+
+    assert response.status_code == status.HTTP_200_OK
+    assert [row['id'] for row in response.json()['results']] == [animal.pk]
+
+
+@pytest.fixture
+def combined_filter_animal(shelter):
+    """Create a matching animal plus distractors differing in one filter each."""
+    fields = {
+        'species': 'dog', 'size': 'medium', 'age_range': 'young',
+        'gender': 'female', 'energy_level': 'low',
+        'good_with_kids': 'yes', 'good_with_dogs': 'no', 'good_with_cats': 'unknown',
+    }
+    matching = AnimalFactory(shelter=shelter, **fields)
+    for field, value in (
+        ('species', 'other'), ('size', 'large'), ('age_range', 'senior'),
+        ('gender', 'male'), ('energy_level', 'high'),
+        ('good_with_kids', 'no'), ('good_with_dogs', 'yes'), ('good_with_cats', 'yes'),
+    ):
+        AnimalFactory(shelter=shelter, **{**fields, field: value})
+    other_shelter = ShelterFactory(owner=shelter.owner)
+    AnimalFactory(shelter=other_shelter, **fields)
+    return matching
+
+
+@pytest.mark.django_db
+def test_animal_list_combines_all_filters(api_client, combined_filter_animal):
+    """Fails if any CSV, compatibility, or shelter filter stops narrowing the list."""
+    response = api_client.get(reverse('animal-list'), {
+        'species': 'dog,cat', 'size': 'medium,small', 'age_range': 'young,adult',
+        'gender': 'female,unknown', 'energy_level': 'low,medium',
+        'good_with_kids': ' yes ', 'good_with_dogs': ' no ', 'good_with_cats': 'unknown',
+        'shelter': combined_filter_animal.shelter_id,
+    })
+
+    assert response.status_code == status.HTTP_200_OK
+    assert [row['id'] for row in response.json()['results']] == [combined_filter_animal.pk]
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('field', ['page', 'page_size', 'shelter'])
+@pytest.mark.parametrize('value', ['invalid', '1.5', '   '])
+def test_animal_list_rejects_malformed_integer(api_client, field, value):
+    """Fails if malformed numeric parameters crash the public list."""
+    response = api_client.get(reverse('animal-list'), {field: value})
+
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
+    assert response.json() == {'error': f'{field} must be an integer'}
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('field', ['page', 'page_size'])
+def test_animal_list_rejects_empty_pagination_value(api_client, field):
+    """Fails if an explicitly empty page parameter silently becomes a default."""
+    response = api_client.get(reverse('animal-list'), {field: ''})
+
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
+    assert response.json() == {'error': f'{field} must be an integer'}
+
+
+@pytest.mark.django_db
+def test_animal_list_ignores_empty_shelter_filter(api_client, animal):
+    """Fails if an empty optional shelter filter rejects the request."""
+    response = api_client.get(reverse('animal-list'), {'shelter': ''})
+
+    assert response.status_code == status.HTTP_200_OK
+    assert [row['id'] for row in response.json()['results']] == [animal.pk]
+
+
+@pytest.mark.django_db
+def test_animal_list_returns_no_matches_for_missing_shelter(api_client, animal):
+    """Fails if a valid but absent shelter identifier stops filtering animals."""
+    response = api_client.get(reverse('animal-list'), {'shelter': animal.shelter_id + 1})
+
+    assert response.status_code == status.HTTP_200_OK
+    assert response.json()['count'] == 0
+    assert response.json()['results'] == []
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(('field', 'value', 'expected'), [
+    ('page', -3, 1), ('page', 0, 1), ('page', 2, 2),
+    ('page_size', -3, 1), ('page_size', 0, 1),
+    ('page_size', 101, 100), ('page_size', 100, 100),
+])
+def test_animal_list_preserves_integer_limits(api_client, animal, field, value, expected):
+    """Fails if integer pagination no longer preserves its existing limits."""
+    response = api_client.get(reverse('animal-list'), {field: value})
+
+    assert response.status_code == status.HTTP_200_OK
+    assert response.json()[field] == expected
+
+
+@pytest.mark.django_db
+def test_animal_list_returns_requested_page(api_client, shelter, animal):
+    """Fails if pagination returns animals from the wrong slice."""
+    AnimalFactory(shelter=shelter)
+    response = api_client.get(reverse('animal-list'), {'page': 2, 'page_size': 1})
+
+    assert response.status_code == status.HTTP_200_OK
+    assert response.json()['count'] == 2
+    assert response.json()['total_pages'] == 2
+    assert [row['id'] for row in response.json()['results']] == [animal.pk]
+
+
+@pytest.mark.django_db
+def test_animal_list_returns_empty_out_of_range_page(api_client, animal):
+    """Fails if an out-of-range page repeats the last page or changes its metadata."""
+    response = api_client.get(reverse('animal-list'), {'page': 5, 'page_size': 1})
+
+    assert response.status_code == status.HTTP_200_OK
+    assert response.json() == {
+        'count': 1, 'page': 5, 'page_size': 1, 'total_pages': 1, 'results': [],
+    }
+
+
+@pytest.mark.django_db
+def test_animal_list_preserves_public_payload(api_client, animal, shelter):
+    """Fails if optimizing the query changes any public animal field or metadata."""
+    response = api_client.get(reverse('animal-list'))
+
+    assert response.status_code == status.HTTP_200_OK
+    assert response.json() == {
+        'count': 1, 'page': 1, 'page_size': 20, 'total_pages': 1,
+        'results': [{
+            'id': animal.pk, 'name': 'Luna', 'species': 'dog', 'breed': 'Labrador',
+            'age_range': 'young', 'gender': 'female', 'size': 'medium',
+            'status': 'published', 'is_vaccinated': True, 'is_sterilized': False,
+            'energy_level': 'medium', 'good_with_kids': 'unknown',
+            'good_with_dogs': 'unknown', 'good_with_cats': 'unknown',
+            'shelter': shelter.pk, 'shelter_name': 'Happy Paws',
+            'created_at': animal.created_at.isoformat().replace('+00:00', 'Z'),
+        }],
+    }
+
+
+@pytest.mark.django_db
+def test_animal_list_filters_by_energy_level(api_client, animal):
+    """Fails if a single energy level stops excluding other energy levels."""
+    matching = AnimalFactory(shelter=animal.shelter, energy_level='high')
+    response = api_client.get(reverse('animal-list'), {'energy_level': 'high'})
+
+    assert response.status_code == status.HTTP_200_OK
+    assert [row['id'] for row in response.json()['results']] == [matching.pk]
+
+
+@pytest.mark.django_db
+def test_animal_list_excludes_archived_published_animals(api_client, animal):
+    """Fails if eager loading accidentally exposes an archived published animal."""
+    AnimalFactory(shelter=animal.shelter, archived_at=animal.created_at)
+    response = api_client.get(reverse('animal-list'))
+
+    assert response.status_code == status.HTTP_200_OK
+    assert [row['id'] for row in response.json()['results']] == [animal.pk]
 
 
 @pytest.mark.django_db
@@ -151,7 +366,7 @@ def test_animal_delete_denied_for_non_owner(authenticated_client, animal):
 
 @pytest.mark.django_db
 def test_animal_list_filters_by_age_range(api_client, animal):
-    """age_range query param filters the animal list."""
+    """Age range query param filters the animal list."""
     response = api_client.get(reverse('animal-list'), {'age_range': 'young'})
 
     assert response.status_code == status.HTTP_200_OK
@@ -162,7 +377,7 @@ def test_animal_list_filters_by_age_range(api_client, animal):
 
 @pytest.mark.django_db
 def test_animal_list_filters_by_shelter(api_client, animal, shelter):
-    """shelter query param filters the animal list."""
+    """Shelter query param filters the animal list."""
     response = api_client.get(reverse('animal-list'), {'shelter': shelter.pk})
 
     assert response.status_code == status.HTTP_200_OK
@@ -173,7 +388,7 @@ def test_animal_list_filters_by_shelter(api_client, animal, shelter):
 
 @pytest.mark.django_db
 def test_animal_list_filters_by_gender(api_client, animal):
-    """gender query param filters the animal list."""
+    """Gender query param filters the animal list."""
     response = api_client.get(reverse('animal-list'), {'gender': 'female'})
 
     assert response.status_code == status.HTTP_200_OK
