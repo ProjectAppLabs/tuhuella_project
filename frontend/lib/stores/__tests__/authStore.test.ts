@@ -212,9 +212,9 @@ describe('authStore', () => {
     expect(useAuthStore.getState().user).toEqual(mockUser);
   });
 
-  it('fetchMe calls signOut on error', async () => {
+  it('fetchMe signs out when credentials are rejected', async () => {
     useAuthStore.setState({ isAuthenticated: true, accessToken: 'token' });
-    mockApi.get.mockRejectedValueOnce(new Error('Unauthorized'));
+    mockApi.get.mockRejectedValueOnce({ response: { status: 401 } });
 
     await act(async () => {
       await useAuthStore.getState().fetchMe();
@@ -222,6 +222,46 @@ describe('authStore', () => {
 
     expect(mockClearTokens).toHaveBeenCalled();
     expect(useAuthStore.getState().isAuthenticated).toBe(false);
+  });
+
+  it.each([
+    ['503', { response: { status: 503 } }],
+    ['network failure', new Error('Network Error')],
+    ['timeout', Object.assign(new Error('timeout'), { code: 'ECONNABORTED' })],
+  ])('fetchMe preserves the session after %s', async (_scenario, validationError) => {
+    useAuthStore.setState({ isAuthenticated: true, accessToken: 'access', refreshToken: 'refresh' });
+    const user = {
+      id: 1, email: 'test@example.com', first_name: 'Test', last_name: 'User',
+      phone: '', city: '', role: 'adopter' as const, is_staff: false, date_joined: '2026-10-08',
+    };
+    useAuthStore.setState({ user });
+    mockApi.get.mockRejectedValueOnce(validationError);
+
+    await act(async () => {
+      await useAuthStore.getState().fetchMe();
+    });
+
+    expect(useAuthStore.getState()).toMatchObject({
+      isAuthenticated: true, accessToken: 'access', refreshToken: 'refresh', user,
+    });
+    expect(mockClearTokens).not.toHaveBeenCalled();
+    expect(mockApi.get).toHaveBeenCalledTimes(1);
+  });
+
+  it('fetchMe recovers user details after a transient validation failure', async () => {
+    useAuthStore.setState({ isAuthenticated: true, accessToken: 'access', refreshToken: 'refresh' });
+    const mockUser = { id: 1, email: 'test@example.com', role: 'adopter' };
+    mockApi.get.mockRejectedValueOnce({ response: { status: 503 } });
+    mockApi.get.mockResolvedValueOnce({ data: { user: mockUser } });
+
+    await act(async () => {
+      await useAuthStore.getState().fetchMe();
+      await useAuthStore.getState().fetchMe();
+    });
+
+    expect(useAuthStore.getState().user).toEqual(mockUser);
+    expect(useAuthStore.getState().isAuthenticated).toBe(true);
+    expect(mockClearTokens).not.toHaveBeenCalled();
   });
 
   it('fetchProfileStats sets stats on success', async () => {

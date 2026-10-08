@@ -67,8 +67,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       if (response.data?.user) {
         set({ user: response.data.user });
       }
-    } catch {
-      get().signOut();
+    } catch (error) {
+      if ((error as { response?: { status?: number } })?.response?.status === 401) {
+        get().signOut();
+      }
     }
   },
   
