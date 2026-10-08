@@ -31,9 +31,12 @@ const refreshAccessToken = async (): Promise<string | null> => {
     if (!access) return null;
     setTokens({ access, refresh });
     return access;
-  } catch (e) {
-    clearTokens();
-    return null;
+  } catch (error) {
+    if ((error as { response?: { status?: number } })?.response?.status === 401) {
+      clearTokens();
+      return null;
+    }
+    throw error;
   }
 };
 
@@ -49,9 +52,10 @@ api.interceptors.response.use(
 
     originalRequest._retry = true;
 
-    refreshPromise = refreshPromise ?? refreshAccessToken();
+    refreshPromise = refreshPromise ?? refreshAccessToken().finally(() => {
+      refreshPromise = null;
+    });
     const newAccess = await refreshPromise;
-    refreshPromise = null;
 
     if (!newAccess) {
       return Promise.reject(error);
