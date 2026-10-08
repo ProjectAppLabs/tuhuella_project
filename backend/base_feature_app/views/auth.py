@@ -448,6 +448,14 @@ def update_password(request):
             status=status.HTTP_400_BAD_REQUEST
         )
     
+    try:
+        validate_password(new_password, user=user)
+    except ValidationError as exc:
+        return Response(
+            {'error': 'Password does not meet requirements', 'details': list(exc.messages)},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
     user.password = make_password(new_password)
     user.save()
     
