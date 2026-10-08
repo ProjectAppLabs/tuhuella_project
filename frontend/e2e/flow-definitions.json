@@ -373,7 +373,8 @@
       "priority": "P1",
       "description": "Unauthenticated user accessing protected routes is redirected to /sign-in",
       "outcomes": [
-        "success"
+        "success",
+        "error"
       ]
     },
     "auth-role-redirect": {
@@ -851,7 +852,8 @@
       "priority": "P2",
       "description": "User with valid tokens accesses protected route; expired access token triggers refresh",
       "outcomes": [
-        "success"
+        "success",
+        "failure"
       ]
     },
     "auth-google-login": {
