@@ -4,9 +4,14 @@ Centralized email utility functions for Mi Huella.
 All outbound email logic lives here. Each function renders a branded HTML
 template and sends both HTML and plain-text versions via Django's send_mail.
 """
+import logging
+
 from django.conf import settings
 from django.core.mail import EmailMultiAlternatives, send_mail
 from django.template.loader import render_to_string
+
+
+logger = logging.getLogger(__name__)
 
 
 TEAM_EMAIL = 'team@proyectapps.co'
@@ -67,8 +72,11 @@ def send_password_reset_code(user, code, locale='es'):
             fail_silently=False,
         )
         return True
-    except Exception as e:
-        print(f"Error sending email: {e}")
+    except Exception as exc:
+        logger.error(
+            'Email delivery failed: operation=%s error_type=%s',
+            'password_reset', type(exc).__name__,
+        )
         return False
 
 
@@ -100,8 +108,11 @@ def send_verification_code(email, code):
             fail_silently=False,
         )
         return True
-    except Exception as e:
-        print(f"Error sending email: {e}")
+    except Exception as exc:
+        logger.error(
+            'Email delivery failed: operation=%s error_type=%s',
+            'verification', type(exc).__name__,
+        )
         return False
 
 
@@ -138,8 +149,11 @@ def send_volunteer_application_notification(application):
             fail_silently=False,
         )
         return True
-    except Exception as e:
-        print(f"Error sending volunteer application notification: {e}")
+    except Exception as exc:
+        logger.error(
+            'Email delivery failed: operation=%s error_type=%s',
+            'volunteer_application', type(exc).__name__,
+        )
         return False
 
 
@@ -177,6 +191,9 @@ def send_contact_form_email(*, name: str, email: str, subject: str, message: str
         msg.attach_alternative(html_message, 'text/html')
         msg.send(fail_silently=False)
         return True
-    except Exception as e:
-        print(f"Error sending contact form email: {e}")
+    except Exception as exc:
+        logger.error(
+            'Email delivery failed: operation=%s error_type=%s',
+            'contact_form', type(exc).__name__,
+        )
         return False
