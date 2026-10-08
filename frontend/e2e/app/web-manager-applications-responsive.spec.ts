@@ -50,6 +50,18 @@ async function mockApplicationApis(page: Page) {
   })));
 }
 
+test.beforeAll(async ({ request }, testInfo) => {
+  const paths = ['/es/sign-in', '/es', '/es/web-manager/applications', '/es/web-manager/applications/1'];
+  const requestTimeout = testInfo.project.timeout;
+  test.setTimeout(requestTimeout * 2);
+  const pages = [];
+  for (const path of paths) {
+    const response = await request.get(path, { maxRedirects: 0, timeout: requestTimeout });
+    pages.push({ path: new URL(response.url()).pathname, status: response.status() });
+  }
+  expect(pages).toEqual(paths.map((path) => ({ path, status: 200 })));
+});
+
 for (const viewport of viewports) {
   test.describe(`Web manager applications — ${viewport.name} ${viewport.width}x${viewport.height}`, () => {
     test.use({ viewport: { width: viewport.width, height: viewport.height }, hasTouch: viewport.cards, timezoneId: 'UTC' });
@@ -85,7 +97,10 @@ for (const viewport of viewports) {
         return { wide: bounds.width >= 44, tall: bounds.height >= 44, fits: bounds.left >= 0 && bounds.right <= innerWidth };
       }))).toEqual(applications.results.map(() => ({ wide: true, tall: true, fits: true })));
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-      await table.getByRole('link', { name: 'Luna', exact: true }).click();
+      await Promise.all([
+        page.waitForResponse((response) => new URL(response.url()).pathname === '/api/adoptions/1/' && response.status() === 200),
+        table.getByRole('link', { name: 'Luna', exact: true }).click(),
+      ]);
       await expect(page).toHaveURL(/\/es\/web-manager\/applications\/1$/);
       await expect(page.getByRole('heading', { level: 1 })).toHaveText('Luna');
     });
