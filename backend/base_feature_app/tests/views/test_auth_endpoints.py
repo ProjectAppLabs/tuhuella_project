@@ -606,13 +606,13 @@ def test_update_password_success(api_client):
 
     response = api_client.post(
         reverse('update_password'),
-        {'current_password': 'pass1234', 'new_password': 'newpass'},
+        {'current_password': 'pass1234', 'new_password': 'DifferentStrongPass123!'},
         format='json',
     )
 
     assert response.status_code == status.HTTP_200_OK
     user.refresh_from_db()
-    assert user.check_password('newpass') is True
+    assert user.check_password('DifferentStrongPass123!') is True
 
 
 @pytest.mark.django_db
@@ -712,3 +712,24 @@ def test_sign_in_rejects_failed_captcha(api_client, monkeypatch):
 
     assert response.status_code == status.HTTP_400_BAD_REQUEST
     assert 'error' in response.json()
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('new_password', ['x', 'password', '123456789', 'password-owner@example.com'])
+def test_update_password_rejects_weak_password(api_client, new_password):
+    """Rejected passwords preserve the user's existing credentials."""
+    User = get_user_model()
+    original = 'OriginalStrongPass123!'
+    user = User.objects.create_user(email='password-owner@example.com', password=original)
+    api_client.force_authenticate(user=user)
+
+    response = api_client.post(
+        reverse('update_password'),
+        {'current_password': original, 'new_password': new_password},
+        format='json',
+    )
+
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
+    assert response.json()['error'] == 'Password does not meet requirements'
+    user.refresh_from_db()
+    assert user.check_password(original) is True

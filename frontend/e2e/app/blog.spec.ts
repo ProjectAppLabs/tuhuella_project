@@ -43,6 +43,51 @@ const mockBlogListResponse = {
   total_pages: 1,
 };
 
+test.describe('Blog — HTML safety', () => {
+  test('preserves safe HTML without executing editorial handlers', { tag: [...BLOG_DETAIL, '@outcome:display'] }, async ({ page }) => {
+    // Keep this browser probe isolated from any configured Django upstream.
+    await page.route('**/api/**', (route) => route.fulfill({
+      status: 200, contentType: 'application/json', body: '[]',
+    }));
+    await page.route('**/api/animals/**', (route) => route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({ results: [], count: 0, page: 1, page_size: 10, total_pages: 0 }),
+    }));
+    const editorialPost = {
+      ...mockBlogPost,
+      slug: 'security-probe',
+      content_json: {},
+      content: '<h2>Safe editorial heading</h2><p><strong>Safe emphasis</strong></p>'
+        + '<a href="/es/animals" target="_blank" rel="opener">Safe animals link</a>'
+        + '<img src="/missing-security-probe" alt="Security probe" onerror="window.__blogSecurityProbe=1">'
+        + '<svg onload="window.__blogSecurityProbe=1"></svg>',
+    };
+    await page.route('**/api/blog/**', (route) => route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({ ...mockBlogListResponse, results: [editorialPost], count: 1, total_pages: 1 }),
+    }));
+    await page.route('**/api/blog/security-probe/**', (route) => route.fulfill({
+      status: 200, contentType: 'application/json', body: JSON.stringify(editorialPost),
+    }));
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await page.getByRole('contentinfo').getByRole('link', { name: 'Blog', exact: true }).click();
+    await page.waitForURL(/\/es\/blog$/);
+    await page.getByRole('link', { name: /Cómo adoptar responsablemente/ }).click();
+    await page.waitForURL(/\/es\/blog\/security-probe$/);
+
+    await expect(page.getByRole('heading', { name: 'Safe editorial heading' })).toBeVisible();
+    await expect(page.getByText('Safe emphasis')).toBeVisible();
+    const link = page.getByRole('link', { name: 'Safe animals link' });
+    await expect(link).toHaveAttribute('href', '/es/animals');
+    await expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+    const image = page.getByAltText('Security probe');
+    await expect(image).not.toHaveAttribute('onerror');
+    // Trigger the exact browser event used by the exploit without touching real data.
+    await image.dispatchEvent('error');
+    expect(await page.evaluate(() => Reflect.get(window, '__blogSecurityProbe'))).toBeUndefined();
+  });
+});
+
 test.describe('Blog — Public', () => {
   test.beforeEach(async ({ page }) => {
     // Mock blog detail API (must be registered before the list catch-all)

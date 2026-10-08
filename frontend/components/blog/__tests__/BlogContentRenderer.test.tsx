@@ -1,8 +1,19 @@
 import React from 'react';
-import { describe, it, expect } from '@jest/globals';
-import { render, screen } from '@testing-library/react';
+import { describe, it, expect, afterEach } from '@jest/globals';
+import { act, render, screen, waitFor } from '@testing-library/react';
+import { renderToString } from 'react-dom/server';
+import { hydrateRoot } from 'react-dom/client';
+import createDOMPurify from 'dompurify';
 
 import BlogContentRenderer from '../BlogContentRenderer';
+
+jest.mock('dompurify', () => ({
+  __esModule: true,
+  default: jest.fn((...args: unknown[]) => jest.requireActual<typeof createDOMPurify>('dompurify')(...args as Parameters<typeof createDOMPurify>)),
+}));
+
+const createPurifier = jest.mocked(createDOMPurify);
+afterEach(() => { createPurifier.mockClear(); });
 
 describe('BlogContentRenderer', () => {
   it('renders intro text from JSON content', () => {
@@ -116,14 +127,14 @@ describe('BlogContentRenderer', () => {
     expect(screen.getByText('¡Adopta hoy!')).toBeInTheDocument();
   });
 
-  it('falls back to HTML content when JSON is empty', () => {
+  it('falls back to HTML content when JSON is empty', async () => {
     render(
       <BlogContentRenderer
         contentJson={null}
         contentHtml="<p>Contenido HTML</p>"
       />,
     );
-    expect(screen.getByText('Contenido HTML')).toBeInTheDocument();
+    expect(await screen.findByText('Contenido HTML')).toBeInTheDocument();
   });
 
   it('renders empty state when no content is provided', () => {
@@ -319,5 +330,112 @@ describe('BlogContentRenderer', () => {
     };
     render(<BlogContentRenderer contentJson={contentJson} />);
     expect(screen.getByTitle('Video')).toBeInTheDocument();
+  });
+});
+
+
+describe('BlogContentRenderer HTML safety', () => {
+  it('discards executable markup', async () => {
+    const { container } = render(<BlogContentRenderer contentHtml={
+      '<p>Safe text</p><img src="/missing" onerror="window.__blogSecurityProbe=1">'
+      + '<svg onload="window.__blogSecurityProbe=1"></svg><script>bad()</script>'
+      + '<iframe src="/unsafe"></iframe><form><input></form>'
+    } />);
+
+    expect(await screen.findByText('Safe text')).toBeInTheDocument();
+    expect(container.querySelector('[onerror], [onload], svg, script, iframe, form, input')).toBeNull();
+  });
+
+  it.each(['javascript:alert(1)', 'java&#10;script:alert(1)', 'data:text/html,unsafe', 'vbscript:bad()'])
+  ('removes the unsafe link %s', async (href) => {
+    render(<BlogContentRenderer contentHtml={`<a href="${href}">Unsafe link</a>`} />);
+
+    expect(await screen.findByText('Unsafe link')).not.toHaveAttribute('href');
+  });
+
+  it('preserves editorial formatting', async () => {
+    render(<BlogContentRenderer contentHtml={
+      '<h2>Heading</h2><p><strong>Bold</strong><em>Emphasis</em></p>'
+      + '<ul><li>Item</li></ul><figure><img src="https://example.com/photo.jpg" alt="Animal"><figcaption>Photo</figcaption></figure>'
+      + '<table><tbody><tr><th scope="col">Column</th><td colspan="2">Cell</td></tr></tbody></table>'
+      + '<a href="/es/animals#dogs" target="_blank" rel="opener">Animals</a>'
+    } />);
+
+    expect(await screen.findByRole('heading', { name: 'Heading' })).toBeInTheDocument();
+    expect(screen.getByText('Bold').tagName).toBe('STRONG');
+    expect(screen.getByText('Emphasis').tagName).toBe('EM');
+    expect(screen.getByRole('listitem')).toHaveTextContent('Item');
+    expect(screen.getByAltText('Animal')).toHaveAttribute('src', 'https://example.com/photo.jpg');
+    expect(screen.getByRole('cell')).toHaveAttribute('colspan', '2');
+    expect(screen.getByRole('link')).toHaveAttribute('href', '/es/animals#dogs');
+    expect(screen.getByRole('link')).toHaveAttribute('rel', 'noopener noreferrer');
+  });
+
+  it('removes noneditorial attributes', async () => {
+    render(<BlogContentRenderer contentHtml='<p style="color:red" class="secret" id="unsafe" data-probe="1" aria-label="probe">Plain</p>' />);
+
+    const paragraph = await screen.findByText('Plain');
+    expect(paragraph).toHaveTextContent('Plain');
+    expect(paragraph.attributes).toHaveLength(0);
+  });
+
+  it('renders an empty HTML article on the server', () => {
+    const markup = renderToString(<BlogContentRenderer contentHtml='<p>Untrusted server content</p>' />);
+
+    expect(markup).not.toContain('Untrusted server content');
+    expect(markup).toMatch(/<article[^>]*><\/article>/);
+    expect(createPurifier).not.toHaveBeenCalled();
+  });
+
+  it('hydrates the empty server article without mismatches', async () => {
+    const contentHtml = '<p>Hydrated content</p>';
+    const host = document.createElement('div');
+    host.innerHTML = renderToString(<BlogContentRenderer contentHtml={contentHtml} />);
+    document.body.appendChild(host);
+    const onRecoverableError = jest.fn();
+    let root: ReturnType<typeof hydrateRoot> | undefined;
+
+    await act(async () => {
+      root = hydrateRoot(host, <BlogContentRenderer contentHtml={contentHtml} />, { onRecoverableError });
+    });
+
+    expect(host).toHaveTextContent('Hydrated content');
+    expect(onRecoverableError).not.toHaveBeenCalled();
+    await act(async () => { root?.unmount(); });
+    host.remove();
+  });
+
+  it('never displays raw HTML while props change', async () => {
+    const { container, rerender } = render(<BlogContentRenderer contentHtml='<p>Old article</p>' />);
+    rerender(<BlogContentRenderer contentHtml='<p>New article</p><img src="/missing" onerror="bad()">' />);
+
+    expect(container).not.toHaveTextContent('Old article');
+    expect(container).not.toHaveTextContent('New article');
+    expect(container.querySelector('[onerror]')).toBeNull();
+    expect(await screen.findByText('New article')).toBeInTheDocument();
+    expect(container).not.toHaveTextContent('Old article');
+  });
+
+  it('keeps the article empty when initialization fails', async () => {
+    createPurifier.mockImplementationOnce(() => { throw new Error('Initialization failed'); });
+    const { container } = render(<BlogContentRenderer contentHtml='<p>Must stay hidden</p>' />);
+
+    await waitFor(() => expect(createPurifier).toHaveBeenCalledTimes(1));
+    expect(container.querySelector('article')).toBeEmptyDOMElement();
+  });
+
+  it('keeps unsupported browsers from rendering unsanitized HTML', async () => {
+    createPurifier.mockImplementationOnce(() => ({ isSupported: false } as ReturnType<typeof createDOMPurify>));
+    const { container } = render(<BlogContentRenderer contentHtml='<p>Unsupported raw HTML</p>' />);
+
+    await waitFor(() => expect(createPurifier).toHaveBeenCalledTimes(1));
+    expect(container.querySelector('article')).toBeEmptyDOMElement();
+  });
+
+  it('prioritizes structured content over HTML', () => {
+    render(<BlogContentRenderer contentJson={{ intro: 'Structured intro', sections: [] }} contentHtml='<p>Unused HTML</p>' />);
+
+    expect(screen.getByRole('article')).toHaveTextContent('Structured intro');
+    expect(screen.queryByText('Unused HTML')).not.toBeInTheDocument();
   });
 });
