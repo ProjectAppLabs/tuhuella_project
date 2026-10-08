@@ -1,3 +1,5 @@
+"""Verify payment endpoints enforce authentication and ownership rules."""
+
 from datetime import UTC, datetime
 
 import pytest
@@ -10,7 +12,7 @@ from base_feature_app.tests.factories import PaymentFactory, UserFactory
 
 @pytest.fixture(params=['donation', 'sponsorship'])
 def owned_payment(request):
-    """A payment belonging to existing_user through either supported parent."""
+    """Create a payment owned by existing_user through either supported parent."""
     parent = request.getfixturevalue(request.param)
     parents = {'donation': None, 'sponsorship': None, request.param: parent}
     return PaymentFactory(
