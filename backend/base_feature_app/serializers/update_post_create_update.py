@@ -14,6 +14,18 @@ class UpdatePostCreateUpdateSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError('You cannot manage this shelter.')
         return value
 
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        shelter = attrs.get('shelter', getattr(self.instance, 'shelter', None))
+        errors = {}
+        for field in ('campaign', 'animal'):
+            related_object = attrs.get(field, getattr(self.instance, field, None))
+            if related_object is not None and related_object.shelter_id != shelter.pk:
+                errors[field] = 'This object does not belong to the selected shelter.'
+        if errors:
+            raise serializers.ValidationError(errors)
+        return attrs
+
     class Meta:
         model = UpdatePost
         fields = [
