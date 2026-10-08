@@ -1,12 +1,18 @@
+"""Verify update post endpoints and shelter association permissions."""
+
 import pytest
 from django.urls import reverse
-from rest_framework import status
 from freezegun import freeze_time
+from rest_framework import status
 
 from base_feature_app.models import NotificationLog, UpdatePost
 from base_feature_app.tests.factories import (
-    AnimalFactory, CampaignFactory, DonationFactory, NotificationPreferenceFactory,
-    ShelterFactory, UpdatePostFactory,
+    AnimalFactory,
+    CampaignFactory,
+    DonationFactory,
+    NotificationPreferenceFactory,
+    ShelterFactory,
+    UpdatePostFactory,
 )
 
 
@@ -34,10 +40,7 @@ def test_update_post_list_filter_by_shelter(api_client, update_post):
 
 @pytest.mark.django_db
 def test_update_post_list_filter_by_campaign_excludes_other_campaigns_post(api_client):
-    """Fails if the `campaign` query param stops filtering update_post_list —
-    e.g. the param is typoed or the `if campaign_id:` branch is dropped in a
-    refactor — which would leak another campaign's update post into a public
-    campaign feed."""
+    """Fails if campaign filtering includes another campaign's update post."""
     campaign_a = CampaignFactory()
     campaign_b = CampaignFactory()
     post_a = UpdatePostFactory(campaign=campaign_a, title_es='Campaign A update')
@@ -195,7 +198,9 @@ def test_update_post_delete_not_found(shelter_admin_client):
 @pytest.mark.django_db
 @freeze_time('2026-10-08 12:00:00')
 class TestUpdatePostShelterRelations:
-    @pytest.mark.parametrize('field,factory', [('campaign', CampaignFactory), ('animal', AnimalFactory)])
+    """Verify effective associations during creation and partial updates."""
+
+    @pytest.mark.parametrize(('field', 'factory'), [('campaign', CampaignFactory), ('animal', AnimalFactory)])
     def test_create_rejects_foreign_relation(self, shelter_admin_client, shelter, field, factory):
         """Fails if a shelter publishes an update associated with another shelter's object."""
         foreign_shelter = ShelterFactory()
@@ -237,7 +242,7 @@ class TestUpdatePostShelterRelations:
             recipient=existing_user, event_key='campaign_update_published'
         ).count() == 0
 
-    @pytest.mark.parametrize('field,factory', [('campaign', CampaignFactory), ('animal', AnimalFactory)])
+    @pytest.mark.parametrize(('field', 'factory'), [('campaign', CampaignFactory), ('animal', AnimalFactory)])
     def test_patch_rejects_foreign_relation(self, shelter_admin_client, update_post, field, factory):
         """Fails if PATCH bypasses ownership by omitting shelter while replacing an association."""
         foreign_object = factory()
@@ -254,7 +259,7 @@ class TestUpdatePostShelterRelations:
         assert getattr(update_post, field + '_id') == original_relation_id
         assert update_post.title_es == 'Luna recovered!'
 
-    @pytest.mark.parametrize('field,factory', [('campaign', CampaignFactory), ('animal', AnimalFactory)])
+    @pytest.mark.parametrize(('field', 'factory'), [('campaign', CampaignFactory), ('animal', AnimalFactory)])
     def test_transfer_rejects_retained_relation(
         self, shelter_admin_client, shelter_admin_user, shelter, field, factory
     ):
