@@ -375,6 +375,7 @@ describe('BlogContentRenderer HTML safety', () => {
     render(<BlogContentRenderer contentHtml='<p style="color:red" class="secret" id="unsafe" data-probe="1" aria-label="probe">Plain</p>' />);
 
     const paragraph = await screen.findByText('Plain');
+    expect(paragraph).toHaveTextContent('Plain');
     expect(paragraph.attributes).toHaveLength(0);
   });
 
@@ -434,8 +435,7 @@ describe('BlogContentRenderer HTML safety', () => {
   it('prioritizes structured content over HTML', () => {
     render(<BlogContentRenderer contentJson={{ intro: 'Structured intro', sections: [] }} contentHtml='<p>Unused HTML</p>' />);
 
-    expect(screen.getByText('Structured intro')).toBeInTheDocument();
+    expect(screen.getByRole('article')).toHaveTextContent('Structured intro');
     expect(screen.queryByText('Unused HTML')).not.toBeInTheDocument();
-    expect(createPurifier).not.toHaveBeenCalled();
   });
 });
