@@ -490,8 +490,12 @@ test.describe('Auth — Transient session failures', () => {
     const failedRefresh = page.waitForResponse((response) => response.url().includes('/token/refresh/') && response.status() === 503);
     await page.goto('/my-profile/notifications');
     await (await failedRefresh).finished();
-    await page.getByRole('button', { name: 'Abrir menú de cuenta' }).filter({ visible: true }).click();
-    await expect(page.getByRole('menuitem', { name: 'Salir' })).toBeVisible();
+    await page.getByRole('button', { name: 'Abrir menú de cuenta' })
+      .or(page.getByRole('button', { name: 'Toggle menu' }))
+      .filter({ visible: true }).click();
+    await expect(page.getByRole('menuitem', { name: 'Salir' })
+      .or(page.getByRole('button', { name: 'Salir', exact: true }))
+      .filter({ visible: true })).toBeVisible();
     await expect(page).toHaveURL(/\/my-profile\/notifications/);
     const retainedCookies = await context.cookies();
     expect(retainedCookies.find((cookie) => cookie.name === 'access_token')?.value).toBe('expired-access');
@@ -514,8 +518,12 @@ test.describe('Auth — Transient session failures', () => {
     await page.reload();
     await (await recoveredValidation).finished();
 
-    await page.getByRole('button', { name: 'Abrir menú de cuenta' }).filter({ visible: true }).click();
-    await expect(page.getByRole('menuitem', { name: 'Salir' })).toBeVisible();
+    await page.getByRole('button', { name: 'Abrir menú de cuenta' })
+      .or(page.getByRole('button', { name: 'Toggle menu' }))
+      .filter({ visible: true }).click();
+    await expect(page.getByRole('menuitem', { name: 'Salir' })
+      .or(page.getByRole('button', { name: 'Salir', exact: true }))
+      .filter({ visible: true })).toBeVisible();
     await expect(page).toHaveURL(/\/my-profile\/notifications/);
     const recoveredCookies = await context.cookies();
     expect(recoveredCookies.find((cookie) => cookie.name === 'access_token')?.value).toBe('recovered-access');
