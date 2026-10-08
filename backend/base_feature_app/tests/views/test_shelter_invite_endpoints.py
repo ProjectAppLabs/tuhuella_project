@@ -1,11 +1,15 @@
+"""Verify shelter invitation permissions and recipient responses."""
+
 import pytest
 from django.urls import reverse
-from rest_framework import status
 from freezegun import freeze_time
+from rest_framework import status
 
 from base_feature_app.models import NotificationLog, ShelterInvite
 from base_feature_app.tests.factories import (
-    NotificationPreferenceFactory, ShelterMembershipFactory, UserFactory,
+    NotificationPreferenceFactory,
+    ShelterMembershipFactory,
+    UserFactory,
 )
 
 
