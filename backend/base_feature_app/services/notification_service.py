@@ -53,6 +53,8 @@ def dispatch_notification(event_key: str, recipient, context: dict):
                 from base_feature_app.tasks import send_email_notification
                 send_email_notification(log.pk)
             except Exception:
+                log.status = NotificationLog.Status.FAILED
+                log.save(update_fields=['status'])
                 logger.exception('Failed to schedule email notification %s', log.pk)
         elif channel == 'in_app':
             # In-app notifications are created as logs with SENT status
