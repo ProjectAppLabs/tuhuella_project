@@ -1,5 +1,6 @@
 from decimal import Decimal, InvalidOperation
 
+from django.db.models import Q
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -117,8 +118,13 @@ def payment_webhook(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def payment_status(request, pk):
+    """Return an unarchived payment visible to its owner or platform auditors."""
+    u = request.user
+    qs = Payment.objects.filter(archived_at__isnull=True)
+    if not (is_superadmin(u) or u.is_staff):
+        qs = qs.filter(Q(donation__user=u) | Q(sponsorship__user=u))
     try:
-        payment = Payment.objects.prefetch_related('status_history').get(pk=pk)
+        payment = qs.prefetch_related('status_history').get(pk=pk)
     except Payment.DoesNotExist:
         return Response({'error': 'Payment not found'}, status=status.HTTP_404_NOT_FOUND)
     serializer = PaymentDetailSerializer(payment, context={'request': request})
