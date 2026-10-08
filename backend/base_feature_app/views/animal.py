@@ -14,37 +14,39 @@ from base_feature_app.serializers.animal_detail import AnimalDetailSerializer
 from base_feature_app.serializers.animal_create_update import AnimalCreateUpdateSerializer
 
 
+def _filter_csv(queryset, field, raw_value):
+    """Apply a multi-choice filter only when it contains non-empty values."""
+    values = [value.strip() for value in (raw_value or '').split(',') if value.strip()]
+    if not values:
+        return queryset
+    return queryset.filter(**{f'{field}__in': values})
+
+
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def animal_list(request):
+    numeric_params = {}
+    for name, default in (('page', 1), ('page_size', 20), ('shelter', None)):
+        value = request.query_params.get(name, default)
+        if name == 'shelter' and not value:
+            continue
+        try:
+            numeric_params[name] = int(value)
+        except (TypeError, ValueError):
+            return Response(
+                {'error': f'{name} must be an integer'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
     queryset = Animal.objects.filter(
         status=Animal.Status.PUBLISHED,
         archived_at__isnull=True,
-    )
+    ).select_related('shelter')
 
-    species = request.query_params.get('species')
-    if species:
-        values = [v.strip() for v in species.split(',') if v.strip()]
-        queryset = queryset.filter(species__in=values) if len(values) > 1 else queryset.filter(species=values[0])
-    size = request.query_params.get('size')
-    if size:
-        values = [v.strip() for v in size.split(',') if v.strip()]
-        queryset = queryset.filter(size__in=values) if len(values) > 1 else queryset.filter(size=values[0])
-    age_range = request.query_params.get('age_range')
-    if age_range:
-        values = [v.strip() for v in age_range.split(',') if v.strip()]
-        queryset = queryset.filter(age_range__in=values) if len(values) > 1 else queryset.filter(age_range=values[0])
-    shelter_id = request.query_params.get('shelter')
-    if shelter_id:
-        queryset = queryset.filter(shelter_id=shelter_id)
-    gender = request.query_params.get('gender')
-    if gender:
-        values = [v.strip() for v in gender.split(',') if v.strip()]
-        queryset = queryset.filter(gender__in=values) if len(values) > 1 else queryset.filter(gender=values[0])
-    energy_level = request.query_params.get('energy_level')
-    if energy_level:
-        values = [v.strip() for v in energy_level.split(',') if v.strip()]
-        queryset = queryset.filter(energy_level__in=values) if len(values) > 1 else queryset.filter(energy_level=values[0])
+    for field in ('species', 'size', 'age_range', 'gender', 'energy_level'):
+        queryset = _filter_csv(queryset, field, request.query_params.get(field))
+    if 'shelter' in numeric_params:
+        queryset = queryset.filter(shelter_id=numeric_params['shelter'])
     good_with_kids = request.query_params.get('good_with_kids')
     if good_with_kids:
         queryset = queryset.filter(good_with_kids=good_with_kids.strip())
@@ -55,10 +57,8 @@ def animal_list(request):
     if good_with_cats:
         queryset = queryset.filter(good_with_cats=good_with_cats.strip())
 
-    page = int(request.query_params.get('page', 1))
-    page_size = int(request.query_params.get('page_size', 20))
-    page = max(1, page)
-    page_size = max(1, min(page_size, 100))
+    page = max(1, numeric_params['page'])
+    page_size = max(1, min(numeric_params['page_size'], 100))
 
     total = queryset.count()
     total_pages = math.ceil(total / page_size) if total > 0 else 1
