@@ -49,6 +49,10 @@ test.describe('Blog — HTML safety', () => {
     await page.route('**/api/**', (route) => route.fulfill({
       status: 200, contentType: 'application/json', body: '[]',
     }));
+    await page.route('**/api/animals/**', (route) => route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({ results: [], count: 0, page: 1, page_size: 10, total_pages: 0 }),
+    }));
     const editorialPost = {
       ...mockBlogPost,
       slug: 'security-probe',
@@ -65,7 +69,9 @@ test.describe('Blog — HTML safety', () => {
     await page.route('**/api/blog/security-probe/**', (route) => route.fulfill({
       status: 200, contentType: 'application/json', body: JSON.stringify(editorialPost),
     }));
-    await page.goto('/es/blog');
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await page.getByRole('contentinfo').getByRole('link', { name: 'Blog', exact: true }).click();
+    await page.waitForURL(/\/es\/blog$/);
     await page.getByRole('link', { name: /Cómo adoptar responsablemente/ }).click();
     await page.waitForURL(/\/es\/blog\/security-probe$/);
 
