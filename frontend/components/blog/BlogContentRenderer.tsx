@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 
 type Section = {
   heading?: string;
@@ -28,6 +28,63 @@ type Props = {
   contentJson?: ContentJSON | Record<string, unknown> | null;
   contentHtml?: string;
 };
+
+const EDITORIAL_TAGS = [
+  'p', 'div', 'span', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'br', 'hr',
+  'blockquote', 'pre', 'code', 'strong', 'b', 'em', 'i', 'u', 's',
+  'ul', 'ol', 'li', 'a', 'img', 'figure', 'figcaption', 'table', 'caption',
+  'thead', 'tbody', 'tfoot', 'tr', 'th', 'td',
+];
+
+const EDITORIAL_ATTRIBUTES: Record<string, string[]> = {
+  a: ['href', 'title', 'target', 'rel'],
+  img: ['src', 'alt', 'title', 'width', 'height'],
+  ol: ['start', 'reversed'],
+  li: ['value'],
+  th: ['colspan', 'rowspan', 'scope'],
+  td: ['colspan', 'rowspan', 'scope'],
+};
+
+async function sanitizeEditorialHtml(input: string): Promise<string> {
+  // This function is called only from an effect: no DOM is needed during SSR.
+  const { default: createDOMPurify } = await import('dompurify');
+  const purifier = createDOMPurify(window);
+  if (!purifier.isSupported) throw new Error('HTML sanitization is unavailable');
+  purifier.addHook('uponSanitizeAttribute', (node, attribute) => {
+    const tag = node.nodeName.toLowerCase();
+    if (!EDITORIAL_ATTRIBUTES[tag]?.includes(attribute.attrName)) {
+      attribute.keepAttr = false;
+      return;
+    }
+    if (attribute.attrName === 'target' && attribute.attrValue !== '_blank') {
+      attribute.keepAttr = false;
+    }
+    if (attribute.attrName === 'href' || attribute.attrName === 'src') {
+      try {
+        const url = new URL(attribute.attrValue, 'https://editorial.invalid/');
+        const protocols = tag === 'a'
+          ? ['http:', 'https:', 'mailto:', 'tel:']
+          : ['http:', 'https:'];
+        attribute.keepAttr = protocols.includes(url.protocol);
+      } catch {
+        attribute.keepAttr = false;
+      }
+    }
+  });
+  purifier.addHook('afterSanitizeAttributes', (node) => {
+    if (node.nodeName.toLowerCase() === 'a' && node instanceof Element
+      && node.getAttribute('target') === '_blank') {
+      node.setAttribute('rel', 'noopener noreferrer');
+    }
+  });
+  return purifier.sanitize(input, {
+    ALLOWED_TAGS: EDITORIAL_TAGS,
+    ALLOWED_ATTR: Object.values(EDITORIAL_ATTRIBUTES).flat(),
+    ALLOW_DATA_ATTR: false,
+    ALLOW_ARIA_ATTR: false,
+    RETURN_TRUSTED_TYPE: false,
+  });
+}
 
 function getYouTubeEmbedUrl(url: string): string | null {
   try {
@@ -242,6 +299,23 @@ function RenderSection({ section, index }: { section: Section; index: number }) 
 
 export default function BlogContentRenderer({ contentJson, contentHtml }: Props) {
   const json = contentJson as ContentJSON | null | undefined;
+  const hasStructuredContent = Boolean(json?.intro && json?.sections);
+  const [sanitizedContent, setSanitizedContent] = useState<{ input: string; html: string } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!contentHtml || hasStructuredContent) return;
+    const input = contentHtml;
+    void sanitizeEditorialHtml(input).then((html) => {
+      if (!cancelled) setSanitizedContent({ input, html });
+    }).catch(() => {
+      // Fail closed: untrusted HTML must never become the fallback on failure.
+      if (!cancelled) setSanitizedContent({ input, html: '' });
+    });
+    return () => { cancelled = true; };
+  }, [contentHtml, hasStructuredContent]);
+
+  const safeHtml = sanitizedContent && sanitizedContent.input === contentHtml ? sanitizedContent.html : '';
 
   if (json && json.intro && json.sections) {
     return (
@@ -275,7 +349,7 @@ export default function BlogContentRenderer({ contentJson, contentHtml }: Props)
     return (
       <article
         className="prose prose-stone max-w-none prose-headings:font-semibold prose-a:text-teal-600"
-        dangerouslySetInnerHTML={{ __html: contentHtml }}
+        dangerouslySetInnerHTML={{ __html: safeHtml }}
       />
     );
   }
