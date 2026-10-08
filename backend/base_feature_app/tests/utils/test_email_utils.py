@@ -1,4 +1,7 @@
 import pytest
+import logging
+from functools import partial
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from base_feature_app.tests.factories import UserFactory, VolunteerPositionFactory
@@ -38,6 +41,87 @@ def test_send_password_reset_code_returns_false_on_smtp_error():
          patch('base_feature_app.utils.email_utils.render_to_string', return_value='<html/>'):
         result = send_password_reset_code(user, '123456')
     assert result is False
+
+
+@pytest.fixture(params=[
+    'password_reset', 'verification', 'volunteer_application', 'contact_form',
+])
+def email_operation(request, settings):
+    settings.EMAIL_BACKEND = 'django.core.mail.backends.locmem.EmailBackend'
+    settings.DEFAULT_FROM_EMAIL = 'team@example.com'
+    user = UserFactory.build(first_name='Laura', email='private@example.com')
+    application = SimpleNamespace(
+        user=user, position=VolunteerPositionFactory.build(),
+        motivation='Private application message',
+    )
+    operations = {
+        'password_reset': partial(send_password_reset_code, user, '123456'),
+        'verification': partial(send_verification_code, user.email, '123456'),
+        'volunteer_application': partial(
+            send_volunteer_application_notification, application,
+        ),
+        'contact_form': partial(
+            send_contact_form_email, name=user.first_name, email=user.email,
+            subject='Private subject', message='Private contact message',
+        ),
+    }
+    return request.param, operations[request.param]
+
+
+@pytest.mark.django_db
+def test_email_failure_emits_sanitized_diagnostic(email_operation, caplog):
+    """A provider failure identifies its operation without leaking its payload."""
+    operation_name, send = email_operation
+    error = RuntimeError('private@example.com 123456 Private contact message')
+
+    with caplog.at_level(logging.ERROR, logger='base_feature_app.utils.email_utils'):
+        with patch(
+            'django.core.mail.backends.locmem.EmailBackend.send_messages',
+            side_effect=error,
+        ):
+            result = send()
+
+    assert result is False
+    assert len(caplog.records) == 1
+    record = caplog.records[0]
+    assert record.name == 'base_feature_app.utils.email_utils'
+    assert record.levelno == logging.ERROR
+    assert record.getMessage() == (
+        f'Email delivery failed: operation={operation_name} error_type=RuntimeError'
+    )
+    assert record.exc_info is None
+    assert str(error) not in caplog.text
+
+
+@pytest.mark.django_db
+def test_email_template_failure_emits_sanitized_diagnostic(email_operation, caplog):
+    """A rendering failure produces the same safe diagnostic as a send failure."""
+    operation_name, send = email_operation
+    error = RuntimeError('private@example.com 123456 Private application message')
+
+    with caplog.at_level(logging.ERROR, logger='base_feature_app.utils.email_utils'):
+        with patch(
+            'base_feature_app.utils.email_utils.render_to_string',
+            side_effect=error,
+        ):
+            send()
+
+    assert len(caplog.records) == 1
+    assert caplog.records[0].getMessage() == (
+        f'Email delivery failed: operation={operation_name} error_type=RuntimeError'
+    )
+    assert caplog.records[0].exc_info is None
+    assert str(error) not in caplog.text
+
+
+@pytest.mark.django_db
+def test_email_success_delivers_message(email_operation, mailoutbox):
+    _, send = email_operation
+
+    result = send()
+
+    assert result is True
+    assert len(mailoutbox) == 1
 
 
 @pytest.mark.django_db
