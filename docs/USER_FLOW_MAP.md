@@ -558,6 +558,8 @@ Use this document to understand each flow's steps, branching conditions, role re
 2. `useRequireAuth()` hook detects missing tokens.
 3. User is redirected to `/sign-in`.
 
+**Outcomes:** `success`, `error`. Un refresh rechazado definitivamente con 401 elimina las credenciales y redirige a iniciar sesión.
+
 ---
 
 ### auth-role-redirect
@@ -627,6 +629,10 @@ Use this document to understand each flow's steps, branching conditions, role re
 | No tokens in cookies | Redirect to `/sign-in` via `useRequireAuth` hook |
 | Access token expired | Frontend calls `POST /api/token/refresh/` with refresh token |
 | Refresh token expired | Redirect to `/sign-in` |
+| Validación o refresh temporalmente indisponible (503, red o timeout) | Conserva credenciales y sesión; una nueva carga permite reintentar |
+| Refresh rechazado definitivamente con 401 | Elimina credenciales y redirige a `/sign-in` |
+
+**Outcomes:** `success` para acceso/renovación válida; `failure` para recuperación tras un fallo transitorio.
 
 ---
 
@@ -673,29 +679,12 @@ Use this document to understand each flow's steps, branching conditions, role re
 |-------|-------|
 | **Priority** | P2 |
 | **Roles** | adopter, shelter_admin, admin, web_manager, veterinarian |
-| **Frontend route** | `/my-profile/edit` |
-| **API endpoints** | `PATCH /api/auth/update_password/` |
+| **Frontend route** | Sin formulario de cambio de contraseña accesible |
+| **API endpoints** | `POST /api/auth/update_password/` |
 
-**Preconditions:** User is authenticated.
+**Contrato backend:** requiere autenticación y contraseña actual. Una contraseña actual incorrecta o una contraseña nueva corta, común, numérica o similar al usuario devuelve 400 sin cambiar la contraseña original. Una contraseña nueva válida devuelve 200.
 
-**Steps:**
-
-1. User navigates to `/my-profile/edit`.
-2. Page renders profile edit form; a "Change Password" section is visible below the profile fields.
-3. User enters current password, new password, and confirmation in the respective inputs.
-4. Frontend validates new password strength (min length, complexity) client-side.
-5. User clicks **Save** / **Guardar contraseña**.
-6. Frontend sends `PATCH /api/auth/update_password/` with `{ current_password, new_password }`.
-7. On success: success toast shown, password fields cleared.
-
-**Branching conditions:**
-
-| Condition | Behavior |
-|-----------|----------|
-| New password too weak | Client-side error before submit |
-| New password ≠ confirmation | Error before submit |
-| Current password wrong | `400` returned; error shown inline |
-| Unauthenticated access | Redirected to `/sign-in` |
+**Cobertura:** `expectedSpecs: 0` conserva la exención E2E porque no hay formulario en la UI. El comportamiento y los casos negativos se verifican con pytest en `backend/base_feature_app/tests/views/test_auth_endpoints.py`.
 
 ---
 
@@ -2736,10 +2725,13 @@ When the shelter has no `video_url`, the button is not rendered.
 
 **Steps:**
 
-1. User navigates to `/blog/[slug]`.
+1. Desde el listado del blog, el usuario abre la tarjeta del artículo.
 2. Page renders full article with title, content, author, reading time, date.
 3. Reading progress bar tracks scroll position.
 4. Back link returns user to blog listing.
+
+
+**HTML editorial sin contenido estructurado:** se muestra después del saneamiento; conserva texto, formato, imágenes y enlaces seguros. Se eliminan eventos, protocolos ejecutables y contenido activo. Si el saneamiento falla, no se inserta HTML original. Outcomes: `display`, `failure`.
 
 ---
 
