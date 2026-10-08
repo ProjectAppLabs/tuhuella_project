@@ -523,6 +523,9 @@ test.describe('Auth — Transient session failures', () => {
   });
 
   test('ends a session after a definitive refresh rejection', { tag: [...AUTH_PROTECTED_REDIRECT, '@outcome:error'] }, async ({ page, context }) => {
+    // quality: allow-no-interaction (loading this protected route automatically
+    // validates the expired access token, rejects refresh with 401, and clears
+    // the session before redirecting; no user interaction triggers this teardown)
     await context.addCookies([
       { name: 'access_token', value: 'expired-access', url: process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:3000' },
       { name: 'refresh_token', value: 'invalid-refresh', url: process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:3000' },
