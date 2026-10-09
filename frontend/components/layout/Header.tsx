@@ -574,8 +574,11 @@ export default function Header() {
       </div>
 
       {mobileState !== 'closed' && (
+        // The panel sits inside the sticky header, so it must scroll on its own: an
+        // authenticated menu is taller than a phone screen and the page cannot move it.
+        // 4.5rem covers the 69px header row above it.
         <div
-          className={`md:hidden border-t border-border-primary bg-surface-secondary/95 backdrop-blur-xl shadow-lg dark:bg-surface-secondary/90 dark:border-border-secondary ${mobileState === 'closing' ? 'animate-scale-out' : 'animate-scale-in'}`}
+          className={`md:hidden max-h-[calc(100dvh_-_4.5rem)] overflow-y-auto overscroll-contain border-t border-border-primary bg-surface-secondary/95 backdrop-blur-xl shadow-lg dark:bg-surface-secondary/90 dark:border-border-secondary ${mobileState === 'closing' ? 'animate-scale-out' : 'animate-scale-in'}`}
           onAnimationEnd={() => { if (mobileState === 'closing') setMobileState('closed'); }}
         >
           <nav className="flex flex-col px-6 py-4 gap-1 text-sm font-medium text-text-secondary">
