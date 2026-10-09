@@ -303,3 +303,48 @@ test.describe('Notification Mark All Read', () => {
     },
   );
 });
+
+// R-navigation-01: at 412 px the open mobile menu lives inside the sticky header. Without its
+// own scroll, an authenticated menu grows taller than the screen and a swipe moves the hidden
+// page instead of the menu, so "Salir" (the only sign-out control on a phone) stays below the
+// fold. Viewport kept local on purpose: the shared viewport helper is not part of this change.
+const COMPACT_VIEWPORT = { width: 412, height: 915 };
+const mobileMenuSessions = [
+  { role: 'shelter_admin' as const, label: 'a shelter admin' },
+  { role: 'adopter' as const, label: 'an adopter' },
+];
+
+test.describe('Header mobile menu @ 412 (celular)', { tag: ['@viewport:compact'] }, () => {
+  test.use({ viewport: COMPACT_VIEWPORT, hasTouch: true });
+
+  for (const { role, label } of mobileMenuSessions) {
+    test(
+      `scrolls inside the open mobile menu to reach Salir as ${label}`,
+      { tag: [...NAVIGATION_HEADER, '@outcome:display', '@outcome:success'] },
+      async ({ page, context }) => {
+        await page.route('**/api/notifications/**', (route) =>
+          route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ results: [], unread_count: 0 }) }),
+        );
+        await loginAndNavigate(page, role, '/');
+        await waitForPageLoad(page);
+        expect((await context.cookies()).some((cookie) => cookie.name === 'access_token')).toBe(true);
+
+        await page.getByRole('button', { name: 'Toggle menu' }).click();
+        const signOut = page.getByRole('banner').getByRole('button', { name: 'Salir', exact: true });
+        await signOut.waitFor({ state: 'attached' });
+        // A thumb swipe over the open panel must scroll the panel, never the page behind it.
+        await page.mouse.move(COMPACT_VIEWPORT.width / 2, COMPACT_VIEWPORT.height / 2);
+        await page.mouse.wheel(0, 1200);
+
+        await expect.poll(() => page.evaluate(() => ({
+          documentScrollY: Math.round(window.scrollY),
+          headerFitsScreen: document.querySelector('header')!.getBoundingClientRect().bottom <= window.innerHeight,
+        }))).toEqual({ documentScrollY: 0, headerFitsScreen: true });
+        await expect(signOut).toBeInViewport({ ratio: 1 });
+
+        await signOut.click();
+        await expect.poll(async () => (await context.cookies()).some((cookie) => cookie.name === 'access_token')).toBe(false);
+      },
+    );
+  }
+});
