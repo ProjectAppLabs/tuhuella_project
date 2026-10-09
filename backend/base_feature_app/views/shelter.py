@@ -9,6 +9,15 @@ from base_feature_app.utils.shelter_access import shelters_managed_by_user
 from base_feature_app.serializers.shelter_detail import ShelterDetailSerializer
 from base_feature_app.serializers.shelter_create_update import ShelterCreateUpdateSerializer
 
+# Relations ShelterListSerializer reads for every row (owner_email, logo_url,
+# cover_image_url). Loading them with the shelters keeps a shelter list at a
+# constant query count instead of several extra queries per shelter.
+SHELTER_LIST_RELATIONS = (
+    'owner',
+    'logo__primary_attachment',
+    'cover_image__primary_attachment',
+)
+
 
 @api_view(['GET'])
 @permission_classes([AllowAny])
@@ -16,7 +25,7 @@ def shelter_list(request):
     shelters = Shelter.objects.filter(
         verification_status=Shelter.VerificationStatus.VERIFIED,
         archived_at__isnull=True,
-    )
+    ).select_related(*SHELTER_LIST_RELATIONS)
     serializer = ShelterListSerializer(shelters, many=True, context={'request': request})
     return Response(serializer.data)
 
