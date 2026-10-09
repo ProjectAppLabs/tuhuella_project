@@ -8,6 +8,7 @@ from base_feature_app.models import AdoptionApplication, Shelter
 from base_feature_app.serializers.adoption_list import AdoptionListSerializer
 from base_feature_app.serializers.shelter_list import ShelterListSerializer
 from base_feature_app.utils.shelter_access import is_web_manager_or_admin
+from base_feature_app.views.shelter import SHELTER_LIST_RELATIONS
 
 
 def _paginate(queryset, request):
@@ -84,7 +85,12 @@ def admin_shelters_list(request):
     if not is_web_manager_or_admin(request.user):
         return Response({'error': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
 
-    qs = Shelter.objects.filter(archived_at__isnull=True).order_by('name')
+    qs = (
+        Shelter.objects
+        .filter(archived_at__isnull=True)
+        .select_related(*SHELTER_LIST_RELATIONS)
+        .order_by('name')
+    )
     verification_status = request.GET.get('verification_status')
     if verification_status:
         qs = qs.filter(verification_status=verification_status)

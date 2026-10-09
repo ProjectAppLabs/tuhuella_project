@@ -1,5 +1,6 @@
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
+from rest_framework.exceptions import NotAuthenticated
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
@@ -9,15 +10,39 @@ from base_feature_app.utils.shelter_access import shelters_managed_by_user
 from base_feature_app.serializers.shelter_detail import ShelterDetailSerializer
 from base_feature_app.serializers.shelter_create_update import ShelterCreateUpdateSerializer
 
+# Relations ShelterListSerializer reads for every row (owner_email, logo_url,
+# cover_image_url). Loading them with the shelters keeps a shelter list at a
+# constant query count instead of several extra queries per shelter.
+SHELTER_LIST_RELATIONS = (
+    'owner',
+    'logo__primary_attachment',
+    'cover_image__primary_attachment',
+)
+
 
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def shelter_list(request):
-    shelters = Shelter.objects.filter(
-        verification_status=Shelter.VerificationStatus.VERIFIED,
-        archived_at__isnull=True,
+    if request.query_params.get('owner') == 'me':
+        # Shelter panel: only the shelters this user manages (owner or team
+        # member), whatever their verification state, so a pending shelter
+        # shows up and the panel never picks up someone else's shelter.
+        if not request.user.is_authenticated:
+            raise NotAuthenticated()
+        shelters = Shelter.objects.filter(
+            pk__in=shelters_managed_by_user(request.user).values('pk'),
+            archived_at__isnull=True,
+        )
+    else:
+        shelters = Shelter.objects.filter(
+            verification_status=Shelter.VerificationStatus.VERIFIED,
+            archived_at__isnull=True,
+        )
+    serializer = ShelterListSerializer(
+        shelters.select_related(*SHELTER_LIST_RELATIONS),
+        many=True,
+        context={'request': request},
     )
-    serializer = ShelterListSerializer(shelters, many=True, context={'request': request})
     return Response(serializer.data)
 
 
