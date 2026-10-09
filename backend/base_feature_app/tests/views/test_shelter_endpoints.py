@@ -1,8 +1,20 @@
+"""Shelter endpoints: public directory, shelter panel list (owner=me), detail, create, update."""
+
+from datetime import datetime
+from datetime import timezone as dt_timezone
+
 import pytest
 from django.urls import reverse
 from rest_framework import status
 
 from base_feature_app.models import Shelter
+from base_feature_app.tests.factories import (
+    ShelterAdminUserFactory,
+    ShelterFactory,
+    ShelterMembershipFactory,
+)
+
+ARCHIVED_AT = datetime(2026, 1, 1, tzinfo=dt_timezone.utc)
 
 
 @pytest.mark.django_db
@@ -20,6 +32,100 @@ def test_shelter_list_returns_only_verified(api_client, shelter):
     names = [s['name'] for s in response.json()]
     assert 'Happy Paws' in names
     assert 'Unverified Place' not in names
+
+
+@pytest.mark.django_db
+def test_owner_me_lists_only_shelters_the_user_manages(shelter_admin_client, shelter):
+    """The shelter panel must not receive another shelter, even a newer verified one."""
+    ShelterFactory(name='Other Verified Shelter')
+
+    response = shelter_admin_client.get(reverse('shelter-list'), {'owner': 'me'})
+
+    assert response.status_code == status.HTTP_200_OK
+    assert [row['name'] for row in response.json()] == ['Happy Paws']
+
+
+@pytest.mark.django_db
+def test_owner_me_includes_shelter_pending_verification(shelter_admin_client, shelter_admin_user):
+    """A shelter still awaiting verification appears in its owner's panel."""
+    ShelterFactory(
+        owner=shelter_admin_user,
+        name='Pending Paws',
+        verification_status=Shelter.VerificationStatus.PENDING,
+    )
+
+    response = shelter_admin_client.get(reverse('shelter-list'), {'owner': 'me'})
+
+    assert response.status_code == status.HTTP_200_OK
+    assert [(row['name'], row['verification_status']) for row in response.json()] == [
+        ('Pending Paws', 'pending'),
+    ]
+
+
+@pytest.mark.django_db
+def test_owner_me_includes_shelter_where_user_is_team_member(api_client):
+    """A team member manages the shelter too, so it belongs in the member's panel."""
+    member = ShelterAdminUserFactory()
+    team_shelter = ShelterFactory(
+        name='Team Shelter',
+        verification_status=Shelter.VerificationStatus.PENDING,
+    )
+    ShelterMembershipFactory(shelter=team_shelter, user=member)
+    ShelterFactory(name='Unrelated Shelter')
+    api_client.force_authenticate(user=member)
+
+    response = api_client.get(reverse('shelter-list'), {'owner': 'me'})
+
+    assert response.status_code == status.HTTP_200_OK
+    assert [row['name'] for row in response.json()] == ['Team Shelter']
+
+
+@pytest.mark.django_db
+def test_owner_me_excludes_archived_shelter(shelter_admin_client, shelter_admin_user):
+    """An archived shelter no longer appears in its owner's panel."""
+    ShelterFactory(
+        owner=shelter_admin_user,
+        name='Live Paws',
+        verification_status=Shelter.VerificationStatus.PENDING,
+    )
+    ShelterFactory(owner=shelter_admin_user, name='Archived Paws', archived_at=ARCHIVED_AT)
+
+    response = shelter_admin_client.get(reverse('shelter-list'), {'owner': 'me'})
+
+    assert response.status_code == status.HTTP_200_OK
+    assert [row['name'] for row in response.json()] == ['Live Paws']
+
+
+@pytest.mark.django_db
+def test_owner_me_rejects_anonymous_request(api_client, shelter):
+    """Without a session the panel list answers 401 instead of any shelter."""
+    response = api_client.get(reverse('shelter-list'), {'owner': 'me'})
+
+    assert response.status_code == status.HTTP_401_UNAUTHORIZED
+    assert list(response.json()) == ['detail']
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    'query',
+    [{}, {'owner': '1'}, {'owner': 'ME'}, {'owner': 'someone'}],
+    ids=['no-owner', 'numeric-owner', 'uppercase-me', 'other-word'],
+)
+def test_shelter_list_stays_public_unless_owner_is_me(
+    shelter_admin_client, shelter_admin_user, query,
+):
+    """Without owner=me even a signed-in shelter admin gets the public verified list."""
+    ShelterFactory(
+        owner=shelter_admin_user,
+        name='Pending Paws',
+        verification_status=Shelter.VerificationStatus.PENDING,
+    )
+    ShelterFactory(name='Other Verified Shelter')
+
+    response = shelter_admin_client.get(reverse('shelter-list'), query)
+
+    assert response.status_code == status.HTTP_200_OK
+    assert [row['name'] for row in response.json()] == ['Other Verified Shelter']
 
 
 @pytest.mark.django_db
