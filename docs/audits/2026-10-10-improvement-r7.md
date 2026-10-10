@@ -48,6 +48,12 @@ Dueño: agente de mantenibilidad. Archivos de aplicación: `admin.py` y tres
 templates de archivo. Pruebas conductuales en `tests/utils/test_admin_archive.py`.
 No se asignaron imágenes ni duplicación editorial a este implementador.
 
+Entrega delegada: `66cc81cc4c2da9ed2477ec8c43be0ea5f8667fcb`, cinco paths y
+árbol limpio. Ochenta casos distintos en verde: 74 nuevos y seis históricos,
+en lotes de 14/16/16/16/18; ambos modos pasan para los dieciséis tipos. Gate
+estricto con Ruff: 100/100, sin errores ni advertencias. El error de traducción
+del primer lote quedó corregido; su ejecución inicial se conserva aparte.
+
 ### Credenciales fuera del diagnóstico OAuth
 
 `I-S-19307e764661` — impacto ALTO, esfuerzo BAJO, riesgo BAJO.
@@ -90,6 +96,20 @@ El orquestador posee `migrations/0026_user_auth_version.py` y `settings.py`:
 soporte independiente en `ae54027525de44abf92bd346e093e79b30d38b5c`, integrado
 en seguridad para probar una rama coherente. No se aplican migraciones ni se
 despliegan servicios en esta ronda.
+
+La rama de seguridad pasó 37 casos backend nuevos y dieciséis regresiones de
+r5/r6 sobre `a32fb81552cbecdb5c2f7741d17b6197da5ff8bf`. La ruta de recuperación
+equivocada en el primer lote se corrigió y se repitieron los lotes afectados.
+La comprobación de migraciones no detecta diferencias pendientes. La cobertura
+de revocación aprobada corresponde a esos dos endpoints públicos; no certifica
+cambios de contraseña realizados por herramientas de mantenimiento.
+
+El E2E inicial confirmó ambos 401, pero esperaba un redirect automático que la
+pantalla de perfil existente no realiza al quedar sin usuario. El spec final
+en `6568f81001e9f939c2e4d66fe7b102c63837145c` exige cierre observable de sesión,
+rechazo de una nueva navegación protegida y acceso con la contraseña nueva.
+No se modifica esa pantalla ni se cuenta el primer E2E como aprobación. Su
+aceptación en navegador corresponde al manifest de la combinación final.
 
 ## Ocho causas elegibles pendientes por cupo
 
