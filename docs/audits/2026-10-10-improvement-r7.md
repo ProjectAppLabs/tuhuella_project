@@ -209,8 +209,11 @@ confirmado y no se afirmó recepción ni se activó integración.
 
 Cada archivo tiene un solo autor. Seguridad dispone de ocho paths de escritura;
 su diff admite además los dos prerequisites escritos por el orquestador.
-Mantenibilidad dispone de cinco paths. Compartido contiene únicamente settings,
-migración y este reporte. La matriz exacta y los registros del motor están en
+Mantenibilidad dispone de cinco paths. Compartido contiene settings, migración,
+este reporte y los dos documentos globales del registro E2E. El Analyst
+revalidó cuatro descripciones de autenticación contra la aplicación,
+manteniendo IDs, outcomes y exenciones; no incorporó flujos ni cambios de UI.
+La matriz exacta y los registros del motor están en
 el archivo privado de la ronda. No se modificó ni se pusheó el toolkit.
 
 La cola valida el árbol combinado antes de drenar los PR de los frentes y el
