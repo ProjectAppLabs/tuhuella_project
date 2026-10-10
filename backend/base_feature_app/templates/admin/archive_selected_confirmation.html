@@ -1,0 +1,28 @@
+{% extends "admin/base_site.html" %}
+{% load i18n l10n admin_urls %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">{% translate "Home" %}</a>
+  &rsaquo; <a href="{{ archive_changelist_url }}">{{ opts.verbose_name_plural|capfirst }}</a>
+  &rsaquo; {% translate "Archive selected objects" %}
+</div>
+{% endblock %}
+
+{% block content %}
+  {% if perms_lacking %}
+    <p>{% translate "You do not have permission to archive every selected object." %}</p>
+  {% else %}
+    <p>{% translate "Archive the selected objects? Related records and files will be preserved." %}</p>
+    <ul>{% for obj in queryset %}<li>{{ obj }}</li>{% endfor %}</ul>
+    <form method="post">{% csrf_token %}
+      {% for obj in queryset %}
+        <input type="hidden" name="{{ action_checkbox_name }}" value="{{ obj.pk|unlocalize }}">
+      {% endfor %}
+      <input type="hidden" name="action" value="delete_selected">
+      <input type="hidden" name="post" value="yes">
+      <input type="submit" value="{% translate 'Archive' %}">
+    </form>
+  {% endif %}
+  <a href="{{ archive_cancel_url }}" class="button">{% translate "Cancel" %}</a>
+{% endblock %}
