@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import type { Locator } from '@playwright/test';
 
 import { test as base, expect } from '../test-with-coverage';
-import { BLOG_ADMIN_EDIT, BLOG_ADMIN_DUPLICATE, BLOG_DETAIL, CAMPAIGN_DETAIL, CAMPAIGN_UPDATES_FEED } from '../helpers/flow-tags';
+import { BLOG_ADMIN_EDIT, BLOG_ADMIN_DUPLICATE, CAMPAIGN_DETAIL, CAMPAIGN_UPDATES_FEED } from '../helpers/flow-tags';
 
 type Article = { id: number; slug: string; title_es: string; title_en: string };
 type EditorialSession = {
@@ -116,7 +116,7 @@ test.beforeAll(() => {
 });
 
 test('shows an uploaded cover after reloading the editor', {
-  tag: [...BLOG_ADMIN_EDIT, ...BLOG_DETAIL, '@outcome:success'],
+  tag: [...BLOG_ADMIN_EDIT, '@outcome:success'],
 }, async ({ page, context, editorial }) => {
   const article = await editorial.createArticle();
   await page.goto('/es/admin/blog');
@@ -148,7 +148,7 @@ test('shows an uploaded cover after reloading the editor', {
 });
 
 test('preserves editorial metadata when duplicating an article', {
-  tag: [...BLOG_ADMIN_DUPLICATE, ...BLOG_ADMIN_EDIT, '@outcome:success'],
+  tag: [...BLOG_ADMIN_DUPLICATE, '@outcome:success'],
 }, async ({ page, editorial }) => {
   const metadata = {
     author: 'laura-blanco', cover_image_credit: 'Editorial photographer',
