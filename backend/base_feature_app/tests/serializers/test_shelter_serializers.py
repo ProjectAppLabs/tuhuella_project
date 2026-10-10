@@ -1,3 +1,5 @@
+"""Verify shelter serializer fields, validation and account email privacy."""
+
 import pytest
 from django.core.files.uploadedfile import SimpleUploadedFile
 
@@ -10,7 +12,7 @@ from base_feature_app.serializers.shelter_list import ShelterListSerializer
 
 @pytest.fixture(autouse=True)
 def fast_shelter_password_hashing(settings):
-    """Serializer privacy tests do not need the production password hashing cost."""
+    """Avoid production hashing costs in serializer privacy tests."""
     settings.PASSWORD_HASHERS = ['django.contrib.auth.hashers.MD5PasswordHasher']
 
 
