@@ -187,6 +187,19 @@ real y gate de esos tres archivos pasaron 100/100, sin hallazgos Ruff/ESLint.
 La aceptación final repite E2E y gate combinado; conserva el SHA de ejecución
 backend original y demuestra que su lógica y el código backend no cambiaron.
 
+El tren inicial de CI confirmó 1.204 pruebas backend y 1.726 unitarias del
+frontend sin fallos ni omitidos. De 292 E2E, 291 pasaron y el nuevo recorrido
+de revocación recibió 429 en el primer login, también en sus dos retries:
+compartía el bucket de intentos con el tráfico de otras pruebas. El fix se
+delegó a Seguridad, sólo en su spec. No autoriza debilitar el limiter,
+aceptar 429, mockear autenticación ni añadir esperas arbitrarias. La ronda
+local verificada es inmutable y se conserva; la regresión de su candidato
+se registra mediante el motor, y la aceptación del fix usa la iteración
+`r7-20261010-ci2`, seguida por CI combinado del contenido actualizado.
+Los fallos del soporte compartido aislado corresponden al módulo de
+Seguridad todavía ausente en esa rama; se drena después de Seguridad y se
+actualiza con master antes de su merge, sin importar implementación ajena.
+
 Entorno aislado propio: Python 3.12.3 y requisitos del lock de la base; Django
 6.0.8, DRF 3.18 y SimpleJWT 5.5.1. Next 16.3.8, React 19.2.8 y Node 20.20.2.
 Sin archivos `.env` de producción, DB del servicio, migraciones del despliegue
