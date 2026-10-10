@@ -47,8 +47,8 @@ Este documento registra decisiones y aceptación, no certifica un SHA por sí mi
 5. `I-M-8d85ad31d0aa`: consumidores de `SingleImageField` usan la API de archivo sobre una `Library`; portada del blog y actualizaciones con imagen pueden fallar.
 6. `I-M-dba8662e66f9`: borrado individual del admin no respeta el archivo masivo. El arreglo coherente también necesita confirmación, permisos, PROTECT y auditoría; esfuerzo y riesgo MEDIO.
 7. `I-M-addad843f628`: duplicación del blog omite metadatos editoriales.
-8. `I-M-b73932da8755`: E2E de comparación de favoritos busca controles inexistentes y puede omitir la interacción; no arreglar silenciosamente los defectos del modal al reparar las pruebas.
-9. `I-M-e9774f378b7b`: E2E de detalle/CTA de campaña puede terminar sin aserciones cuando faltan fixtures.
+8. `I-M-e9774f378b7b`: E2E de comparación de favoritos busca controles inexistentes y puede omitir la interacción; no arreglar silenciosamente los defectos del modal al reparar las pruebas.
+9. `I-M-b73932da8755`: E2E de detalle/CTA de campaña puede terminar sin aserciones cuando faltan fixtures.
 10. `I-R-fdc12518ad0c`: fila de tableta recorta el registro según evidencia histórica; reproducción actual pendiente. Preferir dos filas conservando enlaces; mover Campañas requiere decisión de producto.
 
 El correo de voluntariado a un dominio inexistente sigue siendo un pendiente histórico de r4, sin verificación DNS nueva aquí. El flaky de mensajes de campaña requiere reproducir el fallo y conservar trace; no se atribuye a esta ronda sin evidencia.
