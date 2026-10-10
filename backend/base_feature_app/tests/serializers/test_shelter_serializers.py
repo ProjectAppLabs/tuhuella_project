@@ -141,6 +141,7 @@ def shelter_video_serializer(request, shelter):
 def test_shelter_video_serializer_rejects_disallowed_extension(
     shelter_video_serializer, extension
 ):
+    """Reject video filenames outside the model's allowed extensions."""
     upload = SimpleUploadedFile(f'movie.{extension}', b'uploaded-video')
     serializer = shelter_video_serializer({'video': upload})
 
@@ -155,6 +156,7 @@ def test_shelter_video_serializer_rejects_disallowed_extension(
 def test_shelter_video_serializer_accepts_allowed_extension(
     shelter_video_serializer, extension
 ):
+    """Accept each supported video extension during creation or update."""
     upload = SimpleUploadedFile(f'movie.{extension}', b'uploaded-video')
     serializer = shelter_video_serializer({'video': upload})
 
@@ -166,6 +168,7 @@ def test_shelter_video_serializer_accepts_allowed_extension(
 
 @pytest.mark.django_db
 def test_shelter_video_serializer_accepts_omitted_video(shelter_video_serializer):
+    """Keep the video optional during shelter creation or update."""
     serializer = shelter_video_serializer({})
 
     valid = serializer.is_valid()
@@ -176,6 +179,7 @@ def test_shelter_video_serializer_accepts_omitted_video(shelter_video_serializer
 
 @pytest.mark.django_db
 def test_shelter_video_serializer_accepts_null_video(shelter_video_serializer):
+    """Accept an explicit null value for the optional shelter video."""
     serializer = shelter_video_serializer({'video': None})
 
     valid = serializer.is_valid()

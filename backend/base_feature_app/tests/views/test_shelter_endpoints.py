@@ -380,6 +380,7 @@ def shelter_video_manager_client(request, api_client, shelter):
 def test_shelter_video_update_accepts_allowed_extension(
     shelter_video_manager_client, shelter_with_video, tmp_path, extension
 ):
+    """Persist a supported video uploaded by the shelter owner or team."""
     shelter = shelter_with_video
     previous_files = set(tmp_path.rglob('*'))
     upload = SimpleUploadedFile(f'movie.{extension}', b'uploaded-video')
@@ -406,6 +407,7 @@ def test_shelter_video_update_accepts_allowed_extension(
 def test_shelter_video_update_rejects_disallowed_extension(
     shelter_video_manager_client, shelter_with_video, tmp_path, extension
 ):
+    """Reject forbidden uploads while preserving the previous video."""
     shelter = shelter_with_video
     previous_name = shelter.video.name
     previous_files = set(tmp_path.rglob('*'))
@@ -429,6 +431,7 @@ def test_shelter_video_update_rejects_disallowed_extension(
 def test_shelter_video_update_denies_unrelated_user(
     authenticated_client, shelter_with_video, tmp_path
 ):
+    """Deny video updates from users outside the shelter without writing files."""
     shelter = shelter_with_video
     previous_name = shelter.video.name
     previous_files = set(tmp_path.rglob('*'))
@@ -450,6 +453,7 @@ def test_shelter_video_update_denies_unrelated_user(
 def test_shelter_video_update_preserves_omitted_video(
     shelter_admin_client, shelter_with_video
 ):
+    """Preserve the existing video when a shelter update omits that field."""
     shelter = shelter_with_video
     previous_name = shelter.video.name
 
@@ -468,6 +472,7 @@ def test_shelter_video_update_preserves_omitted_video(
 
 @pytest.mark.django_db
 def test_shelter_video_update_accepts_null_video(shelter_admin_client, shelter_with_video):
+    """Allow the shelter owner to clear the video with an explicit null."""
     shelter = shelter_with_video
 
     response = shelter_admin_client.patch(
