@@ -15,6 +15,7 @@ from datetime import timedelta
 from pathlib import Path
 
 from decouple import Csv, config
+from django.core.exceptions import ImproperlyConfigured
 from huey import RedisHuey
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -245,6 +246,12 @@ STORAGES = {
 # Email configuration (for password reset codes)
 EMAIL_HOST = config('DJANGO_EMAIL_HOST', default='smtp.gmail.com')
 EMAIL_PORT = config('DJANGO_EMAIL_PORT', default=587, cast=int)
+try:
+    EMAIL_TIMEOUT = config('DJANGO_EMAIL_TIMEOUT', default=5, cast=int)
+    if EMAIL_TIMEOUT <= 0:
+        raise ValueError
+except (TypeError, ValueError):
+    raise ImproperlyConfigured('DJANGO_EMAIL_TIMEOUT must be a positive integer.') from None
 EMAIL_USE_TLS = config('DJANGO_EMAIL_USE_TLS', default=True, cast=bool)
 EMAIL_HOST_USER = config('DJANGO_EMAIL_HOST_USER', default='')
 EMAIL_HOST_PASSWORD = config('DJANGO_EMAIL_HOST_PASSWORD', default='')
