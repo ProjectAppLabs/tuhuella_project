@@ -60,14 +60,6 @@ def test_update_post_create_update_serializer_rejects_missing_title(shelter):
     assert 'title_es' in serializer.errors
 
 
-@pytest.mark.django_db
-def test_update_post_create_update_serializer_image_url_is_null_without_image(update_post):
-    """Read representation sets image_url to null when the post has no image."""
-    data = UpdatePostCreateUpdateSerializer(update_post).data
-
-    assert data['image_url'] is None
-
-
 @pytest.fixture(params=['absent', 'empty', 'populated'])
 def update_image(request, update_post, settings, tmp_path):
     """Prepare a real optional Library image in private media storage."""
