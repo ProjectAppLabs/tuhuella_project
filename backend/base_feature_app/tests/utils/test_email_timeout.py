@@ -1,18 +1,17 @@
 """Verify SMTP wait limits through configuration and real delivery paths."""
 
-from pathlib import Path
 import subprocess
 import sys
+from pathlib import Path
 from unittest.mock import ANY, MagicMock, patch
 
+import pytest
 from django.core.mail import get_connection
 from django.urls import reverse
-import pytest
 
 from base_feature_app.models import NotificationLog
 from base_feature_app.tasks import send_email_notification
 from base_feature_app.tests.factories import NotificationLogFactory
-
 
 SETTINGS_IMPORT = """
 import os
