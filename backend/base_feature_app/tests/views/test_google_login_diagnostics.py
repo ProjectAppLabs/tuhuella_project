@@ -18,6 +18,7 @@ UPSTREAM_BODY = 'synthetic-private-upstream-body'
 
 @pytest.fixture(autouse=True)
 def production_google_settings(settings):
+    """Require the configured Google audience without debug fallback."""
     settings.DEBUG = False
     settings.GOOGLE_OAUTH_CLIENT_ID = 'test-client'
     cache.clear()
