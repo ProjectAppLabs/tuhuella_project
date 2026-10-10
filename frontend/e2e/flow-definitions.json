@@ -1,5 +1,5 @@
 {
-  "version": "5.11.1",
+  "version": "5.11.2",
   "lastUpdated": "2026-10-10",
   "flows": {
     "manual-ecosystem-browse": {
@@ -961,7 +961,7 @@
         "shared"
       ],
       "priority": "P2",
-      "description": "User reads a full blog post at /blog/:slug with content, progress bar, sharing",
+      "description": "User opens a published bilingual blog post from the listing and reads its content, progress bar, sharing controls, persisted cover image, and optional image credit.",
       "outcomes": [
         "display",
         "failure"
@@ -1001,7 +1001,7 @@
         "admin"
       ],
       "priority": "P2",
-      "description": "Admin edits an existing blog post fields, JSON content, SEO, cover image",
+      "description": "Admin loads and edits an existing post's fields, JSON content, SEO, and cover image; a valid upload returns a canonical Library attachment URL that persists after reload and is shown on the public ES and EN article.",
       "outcomes": [
         "display",
         "success",
@@ -1514,7 +1514,7 @@
         "admin"
       ],
       "priority": "P3",
-      "description": "Admin duplicates a blog post from the admin list, creating a new draft copy",
+      "description": "Admin opens the confirmation dialog from the blog list and creates a new draft copy with a fresh slug, preserving editorial author, cover credit and URL, keywords, and deep JSON content while resetting publication and featured state.",
       "outcomes": [
         "success"
       ]
@@ -1814,7 +1814,7 @@
         "shared"
       ],
       "priority": "P3",
-      "description": "Visitor opens a completed campaign detail page at /campaigns/[campaignId] and reads the progress-updates feed loaded via GET /api/updates/.",
+      "description": "Visitor reaches a completed campaign through the campaigns listing and reads its progress-updates feed, including each update's title and canonical image URL resolved from its Library primary attachment when present.",
       "outcomes": [
         "display"
       ]
