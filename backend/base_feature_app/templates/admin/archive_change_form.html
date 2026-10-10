@@ -1,0 +1,18 @@
+{% extends "admin/change_form.html" %}
+{% load i18n admin_urls admin_modify %}
+
+{% block object-tools-items %}
+  {{ block.super }}
+  {% if has_delete_permission %}
+    {% url opts|admin_urlname:'delete' original.pk|admin_urlquote as archive_url %}
+    <li><a href="{% add_preserved_filters archive_url %}" class="deletelink">{% translate "Archive" %}</a></li>
+  {% endif %}
+{% endblock %}
+
+{% block submit_buttons_top %}
+  {% with has_delete_permission=False %}{% submit_row %}{% endwith %}
+{% endblock %}
+
+{% block submit_buttons_bottom %}
+  {% with has_delete_permission=False %}{% submit_row %}{% endwith %}
+{% endblock %}
