@@ -7,9 +7,9 @@ prepare the private SQLite database, local mail backend, and in-memory Huey.
 
 from __future__ import annotations
 
+import os
 from decimal import Decimal
 from io import BytesIO
-import os
 from pathlib import Path
 from typing import Final
 
@@ -22,7 +22,6 @@ from huey import MemoryHuey
 from PIL import Image
 
 from base_feature_app.models import Campaign, Shelter, UpdatePost, User
-
 
 _NAMESPACE: Final = "editorial-r8"
 _SHELTER_NAME: Final = "Editorial R8 Shelter"
