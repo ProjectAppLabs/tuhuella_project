@@ -1,3 +1,5 @@
+import { randomInt } from 'node:crypto';
+
 import { test, expect } from '../test-with-coverage';
 import {
   AUTH_PROTECTED_REDIRECT,
@@ -6,11 +8,13 @@ import {
 
 test('requires fresh login after another session changes the password', {
   tag: [...AUTH_SESSION_PERSISTENCE, ...AUTH_PROTECTED_REDIRECT, '@outcome:success'],
-}, async ({ page, request }, testInfo) => {
+}, async ({ page, context }, testInfo) => {
+  const clientIp = `2001:db8::${Array.from({ length: 4 }, () => randomInt(0x10000).toString(16)).join(':')}`;
+  await context.setExtraHTTPHeaders({ 'X-Forwarded-For': clientIp });
   const email = `revocation-${Date.now()}-${testInfo.workerIndex}@example.test`;
   const oldPassword = 'OriginalCredentials123!';
   const newPassword = 'ReplacementCredentials456!';
-  const registration = await request.post('/api/auth/sign_up/', {
+  const registration = await context.request.post('/api/auth/sign_up/', {
     data: { email, password: oldPassword, terms_accepted: true },
   });
   expect(registration.status()).toBe(201);
@@ -34,7 +38,7 @@ test('requires fresh login after another session changes the password', {
   expect((await (await initialValidation).json()).user.email).toBe(email);
   await expect(page.getByText(email, { exact: true })).toBeVisible();
 
-  const passwordChange = await request.post('/api/auth/update_password/', {
+  const passwordChange = await context.request.post('/api/auth/update_password/', {
     headers: { Authorization: `Bearer ${tokens.access}` },
     data: { current_password: oldPassword, new_password: newPassword },
   });
