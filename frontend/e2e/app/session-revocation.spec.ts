@@ -47,6 +47,8 @@ test('requires fresh login after another session changes the password', {
   await page.getByLabel('Correo electrónico').fill(email);
   await page.getByLabel('Contraseña', { exact: true }).fill(newPassword);
   await page.getByRole('button', { name: 'Iniciar sesión', exact: true }).click();
+  await expect(page).not.toHaveURL(/\/sign-in/);
+  await page.goto('/es/my-profile');
   await expect(page).toHaveURL(/\/my-profile$/);
   await expect(page.getByText(email, { exact: true })).toBeVisible();
 });
