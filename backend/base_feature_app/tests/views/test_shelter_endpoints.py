@@ -4,6 +4,7 @@ from datetime import datetime
 from datetime import timezone as dt_timezone
 
 import pytest
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.urls import reverse
 from rest_framework import status
 
@@ -352,3 +353,130 @@ def test_shelter_update_denied_for_non_owner(authenticated_client, shelter):
     assert response.status_code == status.HTTP_404_NOT_FOUND
     shelter.refresh_from_db()
     assert shelter.name == 'Happy Paws'
+
+
+@pytest.fixture
+def shelter_with_video(shelter, settings, tmp_path):
+    """Keep existing and uploaded files inside this test's private media root."""
+    settings.MEDIA_ROOT = str(tmp_path)
+    shelter.video = SimpleUploadedFile('previous.mp4', b'previous-video')
+    shelter.save(update_fields=['video'])
+    return shelter
+
+
+@pytest.fixture(params=['owner', 'team'])
+def shelter_video_manager_client(request, api_client, shelter):
+    """Both existing management paths share the upload validation contract."""
+    user = shelter.owner
+    if request.param == 'team':
+        user = ShelterAdminUserFactory(password=None)
+        ShelterMembershipFactory(shelter=shelter, user=user)
+    api_client.force_authenticate(user=user)
+    return api_client
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('extension', ['mp4', 'webm', 'mov', 'ogg'])
+def test_shelter_video_update_accepts_allowed_extension(
+    shelter_video_manager_client, shelter_with_video, tmp_path, extension
+):
+    shelter = shelter_with_video
+    previous_files = set(tmp_path.rglob('*'))
+    upload = SimpleUploadedFile(f'movie.{extension}', b'uploaded-video')
+
+    response = shelter_video_manager_client.patch(
+        reverse('shelter-update', args=[shelter.pk]),
+        {'video': upload},
+        format='multipart',
+    )
+
+    assert response.status_code == status.HTTP_200_OK
+    shelter.refresh_from_db()
+    assert shelter.video.name == f'shelters/videos/movie.{extension}'
+    assert shelter.video.read() == b'uploaded-video'
+    assert response.json()['video'] == f'http://testserver{shelter.video.url}'
+    assert set(tmp_path.rglob('*')) - previous_files == {tmp_path / shelter.video.name}
+    detail = shelter_video_manager_client.get(reverse('shelter-detail', args=[shelter.pk]))
+    assert detail.status_code == status.HTTP_200_OK
+    assert detail.json()['video_url'] == shelter.video.url
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('extension', ['html', 'svg', 'exe'])
+def test_shelter_video_update_rejects_disallowed_extension(
+    shelter_video_manager_client, shelter_with_video, tmp_path, extension
+):
+    shelter = shelter_with_video
+    previous_name = shelter.video.name
+    previous_files = set(tmp_path.rglob('*'))
+    upload = SimpleUploadedFile(f'movie.{extension}', b'forbidden-content')
+
+    response = shelter_video_manager_client.patch(
+        reverse('shelter-update', args=[shelter.pk]),
+        {'video': upload},
+        format='multipart',
+    )
+
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
+    assert 'video' in response.json()
+    shelter.refresh_from_db()
+    assert shelter.video.name == previous_name
+    assert shelter.video.read() == b'previous-video'
+    assert set(tmp_path.rglob('*')) == previous_files
+
+
+@pytest.mark.django_db
+def test_shelter_video_update_denies_unrelated_user(
+    authenticated_client, shelter_with_video, tmp_path
+):
+    shelter = shelter_with_video
+    previous_name = shelter.video.name
+    previous_files = set(tmp_path.rglob('*'))
+
+    response = authenticated_client.patch(
+        reverse('shelter-update', args=[shelter.pk]),
+        {'video': SimpleUploadedFile('movie.mp4', b'uploaded-video')},
+        format='multipart',
+    )
+
+    assert response.status_code == status.HTTP_404_NOT_FOUND
+    shelter.refresh_from_db()
+    assert shelter.video.name == previous_name
+    assert shelter.video.read() == b'previous-video'
+    assert set(tmp_path.rglob('*')) == previous_files
+
+
+@pytest.mark.django_db
+def test_shelter_video_update_preserves_omitted_video(
+    shelter_admin_client, shelter_with_video
+):
+    shelter = shelter_with_video
+    previous_name = shelter.video.name
+
+    response = shelter_admin_client.patch(
+        reverse('shelter-update', args=[shelter.pk]),
+        {'name': 'Updated Shelter'},
+        format='multipart',
+    )
+
+    assert response.status_code == status.HTTP_200_OK
+    shelter.refresh_from_db()
+    assert shelter.name == 'Updated Shelter'
+    assert shelter.video.name == previous_name
+    assert shelter.video.read() == b'previous-video'
+
+
+@pytest.mark.django_db
+def test_shelter_video_update_accepts_null_video(shelter_admin_client, shelter_with_video):
+    shelter = shelter_with_video
+
+    response = shelter_admin_client.patch(
+        reverse('shelter-update', args=[shelter.pk]),
+        {'video': None},
+        format='json',
+    )
+
+    assert response.status_code == status.HTTP_200_OK
+    shelter.refresh_from_db()
+    assert not shelter.video
+    assert response.json()['video'] is None

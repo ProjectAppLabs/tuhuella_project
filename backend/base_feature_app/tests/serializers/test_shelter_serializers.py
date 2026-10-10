@@ -118,6 +118,72 @@ def test_shelter_create_update_serializer_accepts_blank_website():
     assert serializer.is_valid(), serializer.errors
 
 
+@pytest.fixture(params=['create', 'update'])
+def shelter_video_serializer(request, shelter):
+    """Exercise the video contract for creation and partial updates."""
+    instance = shelter if request.param == 'update' else None
+    partial = request.param == 'update'
+
+    def build_serializer(video_data):
+        data = {
+            'name': 'Video Shelter',
+            'description_es': 'A shelter with a video',
+            'phone': '3001112233',
+            **video_data,
+        }
+        return ShelterCreateUpdateSerializer(instance, data=data, partial=partial)
+
+    return build_serializer
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('extension', ['html', 'svg', 'exe'])
+def test_shelter_video_serializer_rejects_disallowed_extension(
+    shelter_video_serializer, extension
+):
+    upload = SimpleUploadedFile(f'movie.{extension}', b'uploaded-video')
+    serializer = shelter_video_serializer({'video': upload})
+
+    valid = serializer.is_valid()
+
+    assert valid is False
+    assert serializer.errors['video'][0].code == 'invalid_extension'
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('extension', ['mp4', 'webm', 'mov', 'ogg'])
+def test_shelter_video_serializer_accepts_allowed_extension(
+    shelter_video_serializer, extension
+):
+    upload = SimpleUploadedFile(f'movie.{extension}', b'uploaded-video')
+    serializer = shelter_video_serializer({'video': upload})
+
+    valid = serializer.is_valid()
+
+    assert valid is True, serializer.errors
+    assert serializer.validated_data['video'].name == f'movie.{extension}'
+
+
+@pytest.mark.django_db
+def test_shelter_video_serializer_accepts_omitted_video(shelter_video_serializer):
+    serializer = shelter_video_serializer({})
+
+    valid = serializer.is_valid()
+
+    assert valid is True, serializer.errors
+    assert 'video' not in serializer.validated_data
+
+
+@pytest.mark.django_db
+def test_shelter_video_serializer_accepts_null_video(shelter_video_serializer):
+    serializer = shelter_video_serializer({'video': None})
+
+    valid = serializer.is_valid()
+
+    assert valid is True, serializer.errors
+    assert serializer.validated_data['video'] is None
+
+
 # ── list serializer: image URLs come from the Library, not the field ─────────
 # Regression for the HTTP 500 on GET /api/shelters/ (measured 2026-08-03, 4/4
 # calls): logo and cover_image are SingleImageField, i.e. FKs to a
