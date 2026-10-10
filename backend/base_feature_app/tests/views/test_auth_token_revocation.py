@@ -63,7 +63,7 @@ def other_tokens():
 
 @pytest.fixture(params=[
     ('update_password', 'Password updated successfully'),
-    ('verify_passcode_and_reset_password', 'Password reset successfully'),
+    ('verify_passcode_reset', 'Password reset successfully'),
 ], ids=['change-password', 'reset-password'])
 def password_operation(
     request, api_client, user, current_tokens, legacy_refresh,
@@ -300,7 +300,7 @@ def test_reset_rolls_back_revocation_on_code_write_failure(api_client, user):
 
     with patch.object(PasswordCode, 'save', side_effect=OperationalError('database write failure')):
         with pytest.raises(OperationalError):
-            api_client.post(reverse('verify_passcode_and_reset_password'), {
+            api_client.post(reverse('verify_passcode_reset'), {
                 'email': user.email, 'code': code.code, 'new_password': NEW_PASSWORD,
             }, format='json')
 
