@@ -217,4 +217,7 @@ test('loads the illustrated update in a completed campaign', {
   ]));
   await expect(page.getByRole('heading', { name: update.title, exact: true })).toBeVisible();
   await expectLoadedImage(page.getByAltText(update.title, { exact: true }), expectedImage);
+  await page.reload();
+  await expect(page.getByRole('heading', { name: update.title, exact: true })).toBeVisible();
+  await expectLoadedImage(page.getByAltText(update.title, { exact: true }), expectedImage);
 });

@@ -95,9 +95,14 @@ def _ensure_update_image(post: UpdatePost) -> tuple[Library, str | None]:
         post.save(update_fields=["image", "updated_at"])
 
     attachment = Attachment(library=library, rank=0, file=_png_file())
-    attachment.save()
-    library.primary_attachment = attachment
-    library.save(update_fields=["primary_attachment", "updated"])
+    try:
+        attachment.save()
+        library.primary_attachment = attachment
+        library.save(update_fields=["primary_attachment", "updated"])
+    except Exception:
+        if attachment.file and attachment.file.name:
+            attachment.file.storage.delete(attachment.file.name)
+        raise
     return library, attachment.file.name
 
 
