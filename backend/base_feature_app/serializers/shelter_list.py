@@ -1,6 +1,10 @@
 from rest_framework import serializers
 from base_feature_app.models import Shelter
-from base_feature_app.serializers.utils import get_lang, library_primary_url
+from base_feature_app.serializers.utils import (
+    can_view_shelter_owner_email,
+    get_lang,
+    library_primary_url,
+)
 
 
 class ShelterListSerializer(serializers.ModelSerializer):
@@ -17,6 +21,12 @@ class ShelterListSerializer(serializers.ModelSerializer):
             'is_verified', 'logo_url', 'cover_image_url',
             'owner_email', 'created_at',
         ]
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        if not can_view_shelter_owner_email(self, instance):
+            data.pop('owner_email', None)
+        return data
 
     def get_description(self, obj):
         return getattr(obj, f'description_{get_lang(self)}')

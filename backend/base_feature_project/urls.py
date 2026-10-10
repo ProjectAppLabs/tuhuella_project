@@ -6,7 +6,7 @@ from django.conf import settings
 from django.contrib import admin
 from base_feature_app.admin import admin_site
 from django.conf.urls.static import static
-from rest_framework_simplejwt.views import TokenObtainPairView
+from base_feature_app.views.auth import obtain_token_pair
 from base_feature_project.views import SafeTokenRefreshView
 
 
@@ -30,7 +30,7 @@ urlpatterns = [
     path('api/health/', health_check, name='health-check'),
     path('admin-gallery/', admin.site.urls),
     path('admin/', admin_site.urls),
-    path('api/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
+    path('api/token/', obtain_token_pair, name='token_obtain_pair'),
     path('api/token/refresh/', SafeTokenRefreshView.as_view(), name='token_refresh'),
     path('api/', include('base_feature_app.urls')),
 ]

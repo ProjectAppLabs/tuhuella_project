@@ -138,17 +138,50 @@ def test_owner_shelter_list_query_count_is_constant(api_client, record_property)
 
 @pytest.mark.django_db
 def test_public_shelter_list_keeps_each_shelter_owner_with_its_images(api_client):
-    """Fails if a shelter is listed with another shelter's owner, logo or cover."""
+    """Public image URLs still belong to the correct shelter after hiding its owner."""
     _create_shelters_with_images(start=0, count=3)
 
     response = api_client.get(reverse('shelter-list'))
 
     assert response.status_code == status.HTTP_200_OK
     assert sorted(
-        (row['name'], row['owner_email'], row['logo_url'], row['cover_image_url'])
+        (row['name'], row['logo_url'], row['cover_image_url'])
         for row in response.json()
     ) == [
-        (f'Query Shelter {index}', f'owner{index}@example.com',
+        (f'Query Shelter {index}',
          f'/media/attachments/test/logo-{index}.jpg', f'/media/attachments/test/cover-{index}.jpg')
         for index in range(3)
     ]
+
+
+@pytest.mark.django_db
+def test_authenticated_public_shelter_list_permissions_keep_query_count_constant(api_client, record_property):
+    """A mixed list checks membership once regardless of how many shelters it returns."""
+    member = ShelterAdminUserFactory(password=None)
+    own = _create_shelters_with_images(start=0, count=1)[0]
+    own.owner = member
+    own.save(update_fields=['owner'])
+    api_client.force_authenticate(user=member)
+    url = reverse('shelter-list')
+
+    with CaptureQueriesContext(connection) as one_row:
+        small_response = api_client.get(url)
+    team_shelter = _create_shelters_with_images(start=1, count=1)[0]
+    ShelterMembershipFactory(shelter=team_shelter, user=member)
+    _create_shelters_with_images(start=2, count=18)
+    with CaptureQueriesContext(connection) as twenty_rows:
+        large_response = api_client.get(url)
+    record_property('one_row_queries', len(one_row))
+    record_property('twenty_rows_queries', len(twenty_rows))
+    rows = {row['id']: row for row in large_response.json()}
+
+    assert small_response.status_code == status.HTTP_200_OK
+    assert large_response.status_code == status.HTTP_200_OK
+    assert len(rows) == 20
+    assert {
+        own.pk: rows[own.pk]['owner_email'],
+        team_shelter.pk: rows[team_shelter.pk]['owner_email'],
+    } == {own.pk: member.email, team_shelter.pk: team_shelter.owner.email}
+    assert sum('owner_email' in row for row in rows.values()) == 2
+    assert len(twenty_rows) == len(one_row)
+    assert len(twenty_rows) <= MAX_SHELTER_LIST_QUERIES

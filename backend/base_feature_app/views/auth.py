@@ -2,12 +2,20 @@
 Authentication views for user sign up, sign in, and password management.
 """
 import logging
+from collections.abc import Mapping
 
-from rest_framework.decorators import api_view, permission_classes, throttle_classes
+from rest_framework.decorators import (
+    api_view, authentication_classes, permission_classes, throttle_classes,
+)
+from rest_framework.exceptions import AuthenticationFailed
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.throttling import AnonRateThrottle
+from rest_framework.views import exception_handler
+from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
+from rest_framework_simplejwt.settings import api_settings as jwt_settings
 from django.contrib.auth.hashers import check_password, make_password
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import update_last_login
@@ -60,6 +68,40 @@ class PasswordResetVerifyThrottle(AnonRateThrottle):
 
 class SignInThrottle(AnonRateThrottle):
     scope = 'sign_in'
+
+
+@api_view(['POST'])
+@authentication_classes([])
+@permission_classes([AllowAny])
+@throttle_classes([SignInThrottle])
+def obtain_token_pair(request):
+    """Preserve the token API contract while sharing the sign-in controls."""
+    serializer = TokenObtainPairSerializer(data=request.data, context={'request': request})
+    # Invalid JSON shapes still reach the serializer's native validation rather
+    # than calling .get() on a list, string or null body.
+    if isinstance(request.data, Mapping):
+        if not verify_recaptcha(request.data.get('captcha_token', '')):
+            return Response(
+                {'error': 'reCAPTCHA verification failed.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+    try:
+        serializer.is_valid(raise_exception=True)
+        if serializer.user.archived_at:
+            raise AuthenticationFailed(
+                serializer.error_messages['no_active_account'], code='no_active_account',
+            )
+    except (AuthenticationFailed, TokenError) as exc:
+        if isinstance(exc, TokenError):
+            exc = InvalidToken(exc.args[0])
+        response = exception_handler(exc, {'request': request})
+        # TokenViewBase supplies this challenge even with no authenticators;
+        # without it, a function-based DRF view would turn these failures into 403.
+        response['WWW-Authenticate'] = f'{jwt_settings.AUTH_HEADER_TYPES[0]} realm="api"'
+        return response
+
+    return Response(serializer.validated_data, status=status.HTTP_200_OK)
 
 
 @api_view(['POST'])
