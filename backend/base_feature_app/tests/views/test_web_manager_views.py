@@ -78,6 +78,16 @@ def test_admin_shelters_list_returns_all_shelters(web_manager_client):
 
 
 @pytest.mark.django_db
+def test_admin_shelters_list_keeps_owner_email(web_manager_client):
+    shelter = ShelterFactory()
+
+    response = web_manager_client.get('/api/admin/shelters/all/')
+
+    assert response.status_code == 200
+    assert response.json()['results'][0]['owner_email'] == shelter.owner.email
+
+
+@pytest.mark.django_db
 def test_admin_shelters_list_forbidden_for_non_manager(authenticated_client):
     """Adopter receives 403 on the admin shelters endpoint."""
     response = authenticated_client.get('/api/admin/shelters/all/')

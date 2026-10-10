@@ -8,6 +8,12 @@ from base_feature_app.serializers.shelter_detail import ShelterDetailSerializer
 from base_feature_app.serializers.shelter_list import ShelterListSerializer
 
 
+@pytest.fixture(autouse=True)
+def fast_shelter_password_hashing(settings):
+    """Serializer privacy tests do not need the production password hashing cost."""
+    settings.PASSWORD_HASHERS = ['django.contrib.auth.hashers.MD5PasswordHasher']
+
+
 @pytest.mark.django_db
 def test_shelter_list_serializer_fields(shelter):
     """List serializer returns expected fields."""
@@ -17,7 +23,7 @@ def test_shelter_list_serializer_fields(shelter):
     assert data['name'] == 'Happy Paws'
     assert data['city'] == 'Bogotá'
     assert data['verification_status'] == 'verified'
-    assert data['owner_email'] == 'shelteradmin@example.com'
+    assert 'owner_email' not in data
     assert 'created_at' in data
 
 
@@ -33,6 +39,14 @@ def test_shelter_detail_serializer_fields(shelter):
     assert data['email'] == 'info@happypaws.org'
     assert data['is_verified'] is True
     assert 'updated_at' in data
+
+
+@pytest.mark.django_db
+def test_shelter_detail_serializer_omits_owner_email_without_request(shelter):
+    """A serializer without an authenticated request must not expose account data."""
+    data = ShelterDetailSerializer(shelter).data
+
+    assert 'owner_email' not in data
 
 
 @pytest.mark.django_db
