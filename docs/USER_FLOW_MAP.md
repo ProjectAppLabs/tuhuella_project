@@ -6,8 +6,8 @@ Use this document to understand each flow's steps, branching conditions, role re
 
 > **Flow IDs in this document match `e2e/flow-definitions.json` and `e2e/helpers/flow-tags.ts` exactly.**
 
-**Version:** 5.11.0
-**Last Updated:** 2026-09-19
+**Version:** 5.11.1
+**Last Updated:** 2026-10-10
 
 ---
 
@@ -468,8 +468,8 @@ Use this document to understand each flow's steps, branching conditions, role re
 3. UI transitions to step = `code`. User sees Code + New Password + Confirm Password fields.
 4. User enters the 6-digit code and a password that passes `validate_password()` (≥8 chars, not all-numeric, not common).
 5. Frontend POSTs `{ email, code, new_password }` to `/api/auth/verify_passcode_and_reset_password/`.
-6. Backend verifies code (not used, not expired), sets new password, marks code used. Returns HTTP 200.
-7. Success message shown; user redirected to `/sign-in`.
+6. Backend verifies code (not used, not expired), validates the password, stores the new password, advances the account credential generation, and marks the code used. Returns HTTP 200.
+7. Access and refresh tokens issued before that reset for the same account are rejected. The page shows the success state and redirects the resetting user to `/sign-in`.
 
 **Branching conditions:**
 
@@ -550,15 +550,17 @@ Use this document to understand each flow's steps, branching conditions, role re
 | **Roles** | shared |
 | **Frontend route** | any protected route |
 
-**Preconditions:** User is NOT authenticated (no tokens in cookies).
+**Preconditions:** User has no access cookie, either initially or because the application removed both token cookies after a definitive `401` refresh rejection.
 
 **Steps:**
 
-1. Unauthenticated user navigates to a protected route (e.g., `/favoritos`, `/refugio/dashboard`).
-2. `useRequireAuth()` hook detects missing tokens.
-3. User is redirected to `/sign-in`.
+1. A user without an access cookie navigates to a protected route.
+2. The proxy redirects that request to `/sign-in`.
+3. If a protected page first detects a revoked access token, validation returns `401`; the refresh also returns `401`; the application clears both cookies.
+4. The current profile page retains its loading state after its user is cleared. A subsequent navigation to a protected route reaches the proxy without credentials and redirects to `/sign-in`.
+5. Signing in with the replacement password issues current-generation tokens and restores protected access.
 
-**Outcomes:** `success`, `error`. Un refresh rechazado definitivamente con 401 elimina las credenciales y redirige a iniciar sesión.
+**Outcomes:** `success` for the enforced sign-in gate and restored access after fresh authentication; `error` for the deliberate teardown of a revoked session.
 
 ---
 
@@ -612,7 +614,7 @@ Use this document to understand each flow's steps, branching conditions, role re
 | **Frontend route** | any protected route |
 | **API endpoints** | `GET /api/auth/validate_token/`, `POST /api/token/refresh/` |
 
-**Preconditions:** User has valid tokens in cookies.
+**Preconditions:** User has access and refresh tokens from the account's current credential generation in cookies.
 
 **Steps:**
 
@@ -626,13 +628,14 @@ Use this document to understand each flow's steps, branching conditions, role re
 
 | Condition | Behavior |
 |-----------|----------|
-| No tokens in cookies | Redirect to `/sign-in` via `useRequireAuth` hook |
-| Access token expired | Frontend calls `POST /api/token/refresh/` with refresh token |
-| Refresh token expired | Redirect to `/sign-in` |
-| Validación o refresh temporalmente indisponible (503, red o timeout) | Conserva credenciales y sesión; una nueva carga permite reintentar |
-| Refresh rechazado definitivamente con 401 | Elimina credenciales y redirige a `/sign-in` |
+| No tokens in cookies | A protected-route request is redirected to `/sign-in` by the proxy. |
+| Access token expired | Frontend calls `POST /api/token/refresh/` with the refresh token. |
+| Password changed or reset in another session | Both tokens from the earlier credential generation are rejected with `401`; the interceptor removes both cookies. The profile keeps its existing loading state until the user navigates again. |
+| Refresh token expired or definitively rejected | The interceptor removes both cookies; the next protected-route navigation redirects to `/sign-in`. |
+| Validación o refresh temporalmente indisponible (`503`, red o timeout) | Conserva credenciales y sesión; una nueva carga permite reintentar. |
+| Fresh sign-in with the replacement password | The backend issues current-generation tokens and protected content loads again. |
 
-**Outcomes:** `success` para acceso/renovación válida; `failure` para recuperación tras un fallo transitorio.
+**Outcomes:** `success` for current-generation validation, refresh, enforced revocation, and fresh re-authentication; `failure` for recovery after a transient validation or refresh failure.
 
 ---
 
@@ -682,9 +685,9 @@ Use this document to understand each flow's steps, branching conditions, role re
 | **Frontend route** | Sin formulario de cambio de contraseña accesible |
 | **API endpoints** | `POST /api/auth/update_password/` |
 
-**Contrato backend:** requiere autenticación y contraseña actual. Una contraseña actual incorrecta o una contraseña nueva corta, común, numérica o similar al usuario devuelve 400 sin cambiar la contraseña original. Una contraseña nueva válida devuelve 200.
+**Contrato backend:** No hay formulario accesible, por lo que este contrato permanece fuera del alcance E2E. `POST /api/auth/update_password/` requiere autenticación, contraseña actual y una contraseña nueva válida. Una contraseña actual incorrecta o una contraseña nueva corta, común, numérica o similar al usuario devuelve `400` sin cambiar las credenciales. Una actualización válida devuelve `200`, incrementa la generación de credenciales de la cuenta y revoca sus access y refresh tokens anteriores; el usuario puede volver a iniciar sesión con la contraseña nueva.
 
-**Cobertura:** `expectedSpecs: 0` conserva la exención E2E porque no hay formulario en la UI. El comportamiento y los casos negativos se verifican con pytest en `backend/base_feature_app/tests/views/test_auth_endpoints.py`.
+**Cobertura:** `expectedSpecs: 0` conserva la exención E2E porque no hay formulario en la UI. El comportamiento y los casos negativos se verifican con pytest en `backend/base_feature_app/tests/views/test_auth_endpoints.py` y `backend/base_feature_app/tests/views/test_auth_token_revocation.py`.
 
 ---
 
