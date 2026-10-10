@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from base_feature_app.models import UpdatePost
-from base_feature_app.serializers.utils import get_lang
+from base_feature_app.serializers.utils import get_lang, library_primary_url
 
 
 class UpdatePostDetailSerializer(serializers.ModelSerializer):
@@ -23,6 +23,4 @@ class UpdatePostDetailSerializer(serializers.ModelSerializer):
         return getattr(obj, f'content_{get_lang(self)}')
 
     def get_image_url(self, obj):
-        if obj.image:
-            return obj.image.url
-        return None
+        return library_primary_url(obj.image, default=None)
