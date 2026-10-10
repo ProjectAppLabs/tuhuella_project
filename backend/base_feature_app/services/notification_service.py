@@ -6,10 +6,24 @@ creating NotificationLog entries and scheduling async tasks for email delivery.
 """
 
 import logging
+from functools import partial
 
-from base_feature_app.models import NotificationPreference, NotificationLog
+from django.db import transaction
+
+from base_feature_app.models import NotificationLog, NotificationPreference
 
 logger = logging.getLogger(__name__)
+
+
+def _schedule_email_notification(log_id: int) -> None:
+    """Publish a committed email log while preserving queue failure state."""
+    try:
+        from base_feature_app.tasks import send_email_notification
+
+        send_email_notification(log_id)
+    except Exception:
+        NotificationLog.objects.filter(pk=log_id).update(status=NotificationLog.Status.FAILED)
+        logger.exception('Failed to schedule email notification %s', log_id)
 
 
 def dispatch_notification(event_key: str, recipient, context: dict):
@@ -49,13 +63,7 @@ def dispatch_notification(event_key: str, recipient, context: dict):
         )
 
         if channel == 'email':
-            try:
-                from base_feature_app.tasks import send_email_notification
-                send_email_notification(log.pk)
-            except Exception:
-                log.status = NotificationLog.Status.FAILED
-                log.save(update_fields=['status'])
-                logger.exception('Failed to schedule email notification %s', log.pk)
+            transaction.on_commit(partial(_schedule_email_notification, log.pk))
         elif channel == 'in_app':
             # In-app notifications are created as logs with SENT status
             log.status = NotificationLog.Status.SENT
