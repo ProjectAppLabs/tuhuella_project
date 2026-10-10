@@ -196,6 +196,10 @@ aceptar 429, mockear autenticación ni añadir esperas arbitrarias. La ronda
 local verificada es inmutable y se conserva; la regresión de su candidato
 se registra mediante el motor, y la aceptación del fix usa la iteración
 `r7-20261010-ci2`, seguida por CI combinado del contenido actualizado.
+El launcher privado anterior fijaba 100 intentos/minuto; el cierre de esa
+iteración usa 10/minuto, igual que CI, y registra las tasas efectivas del
+proceso. Esa configuración sólo pertenece al entorno de prueba aislado;
+no cambia settings ni límites de la aplicación versionada.
 Los fallos del soporte compartido aislado corresponden al módulo de
 Seguridad todavía ausente en esa rama; se drena después de Seguridad y se
 actualiza con master antes de su merge, sin importar implementación ajena.
