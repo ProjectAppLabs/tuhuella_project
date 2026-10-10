@@ -2,15 +2,18 @@ import copy as _copy
 import logging
 import math
 
+from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 from django.shortcuts import get_object_or_404
 from django.utils.dateparse import parse_date
-from rest_framework import status
+from rest_framework import serializers, status
 from rest_framework.decorators import api_view, parser_classes, permission_classes
 from rest_framework.parsers import MultiPartParser
 from rest_framework.permissions import AllowAny, IsAdminUser
 from rest_framework.response import Response
+from django_attachments.models import Attachment, Library
 
 from base_feature_app.models import BlogPost
 from base_feature_app.serializers.blog import (
@@ -291,14 +294,19 @@ def duplicate_blog_post(request, post_id):
         content_json_es=_copy.deepcopy(post.content_json_es),
         content_json_en=_copy.deepcopy(post.content_json_en),
         cover_image_url=post.cover_image_url,
+        cover_image_credit=post.cover_image_credit,
+        cover_image_credit_url=post.cover_image_credit_url,
         sources=_copy.deepcopy(post.sources),
         category=post.category,
         read_time_minutes=post.read_time_minutes,
         is_featured=False,
+        author=post.author,
         meta_title_es=post.meta_title_es,
         meta_title_en=post.meta_title_en,
         meta_description_es=post.meta_description_es,
         meta_description_en=post.meta_description_en,
+        meta_keywords_es=post.meta_keywords_es,
+        meta_keywords_en=post.meta_keywords_en,
         is_published=False,
         published_at=None,
     )
@@ -323,11 +331,33 @@ def upload_blog_cover_image(request, post_id):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    post.cover_image = cover
-    post.save(update_fields=['cover_image', 'updated_at'])
+    try:
+        cover = serializers.ImageField().run_validation(cover)
+    except (serializers.ValidationError, DjangoValidationError) as exc:
+        detail = getattr(exc, 'detail', getattr(exc, 'messages', []))
+        return Response({'cover_image': detail}, status=status.HTTP_400_BAD_REQUEST)
 
-    detail = BlogPostAdminDetailSerializer(post)
-    return Response(detail.data, status=status.HTTP_200_OK)
+    attachment = None
+    try:
+        with transaction.atomic():
+            library = Library.objects.create(title=f'Cover: {post.title_es}'[:255])
+            attachment = Attachment(library=library, rank=0)
+            attachment.file.save(cover.name, cover, save=False)
+            attachment.save()
+            library.primary_attachment = attachment
+            library.save(update_fields=['primary_attachment'])
+            # A previous library can be shared, including by archived records.
+            post.cover_image = library
+            post.save(update_fields=['cover_image', 'updated_at'])
+            detail = BlogPostAdminDetailSerializer(post).data
+    except Exception:
+        # Storage writes are not rolled back with database rows. Only remove
+        # this request's new file; existing libraries and files stay intact.
+        if attachment is not None and attachment.file.name:
+            attachment.file.storage.delete(attachment.file.name)
+        raise
+
+    return Response(detail, status=status.HTTP_200_OK)
 
 
 @api_view(['GET'])

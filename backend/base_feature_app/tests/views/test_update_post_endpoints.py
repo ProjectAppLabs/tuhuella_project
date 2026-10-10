@@ -1,8 +1,13 @@
 """Verify update post endpoints and shelter association permissions."""
 
+from io import BytesIO
+
 import pytest
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.urls import reverse
+from django_attachments.models import Attachment, Library
 from freezegun import freeze_time
+from PIL import Image
 from rest_framework import status
 
 from base_feature_app.models import NotificationLog, UpdatePost
@@ -401,3 +406,67 @@ class TestUpdatePostShelterRelations:
         assert update_post.shelter_id == original_shelter_id
         assert update_post.campaign_id == original_campaign_id
         assert update_post.animal_id == original_animal_id
+
+
+@pytest.fixture
+def update_library(settings, tmp_path, db):
+    """Create a real illustrated Library in private media storage."""
+    settings.MEDIA_ROOT = str(tmp_path)
+    image_data = BytesIO()
+    Image.new('RGB', (2, 2), 'green').save(image_data, format='PNG')
+    library = Library.objects.create(title='Update image')
+    attachment = Attachment.objects.create(
+        library=library, rank=0,
+        file=SimpleUploadedFile('update.png', image_data.getvalue(), 'image/png'),
+    )
+    library.primary_attachment = attachment
+    library.save(update_fields=['primary_attachment'])
+    return library
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('endpoint', ['update-post-list', 'update-post-detail'])
+def test_update_post_public_image_url(api_client, update_post, update_library, endpoint):
+    """Public endpoints serialize an illustrated update without a server error."""
+    update_post.image = update_library
+    update_post.save(update_fields=['image'])
+    urls = {
+        'update-post-list': reverse('update-post-list'),
+        'update-post-detail': reverse('update-post-detail', kwargs={'pk': update_post.pk}),
+    }
+
+    response = api_client.get(urls[endpoint])
+
+    assert response.status_code == 200
+    payload = response.data
+    rows = {'update-post-list': payload, 'update-post-detail': [payload]}
+    assert rows[endpoint][0]['image_url'] == update_library.primary_attachment.file.url
+
+
+@pytest.mark.django_db
+def test_update_post_create_accepts_image_library(shelter_admin_client, shelter, update_library):
+    """Authorized creation preserves the image foreign key contract."""
+    payload = {
+        'shelter': shelter.pk, 'title_es': 'Illustrated update',
+        'content_es': 'Recovery news', 'image': update_library.pk,
+    }
+
+    response = shelter_admin_client.post(reverse('update-post-create'), payload, format='json')
+
+    assert response.status_code == 201
+    post = UpdatePost.objects.get(pk=response.data['id'])
+    assert post.image_id == update_library.pk
+    assert response.data['image_url'] == update_library.primary_attachment.file.url
+
+
+@pytest.mark.django_db
+def test_update_post_patch_accepts_image_library(shelter_admin_client, update_post, update_library):
+    """Authorized edits preserve the image foreign key contract."""
+    url = reverse('update-post-update', kwargs={'pk': update_post.pk})
+
+    response = shelter_admin_client.patch(url, {'image': update_library.pk}, format='json')
+
+    assert response.status_code == 200
+    update_post.refresh_from_db()
+    assert update_post.image_id == update_library.pk
+    assert response.data['image_url'] == update_library.primary_attachment.file.url
