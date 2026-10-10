@@ -1,6 +1,6 @@
 {
-  "version": "5.11.0",
-  "lastUpdated": "2026-09-19",
+  "version": "5.11.1",
+  "lastUpdated": "2026-10-10",
   "flows": {
     "manual-ecosystem-browse": {
       "name": "Explore the complete ecosystem",
@@ -332,7 +332,7 @@
         "guest"
       ],
       "priority": "P2",
-      "description": "User completes the full reset wizard on /forgot-password: (1) enters email and sends code, (2) enters the 6-digit code, (3) sets a new password that passes strength validation, (4) sees success state and is redirected to /sign-in",
+      "description": "User completes the full reset wizard on /forgot-password: (1) enters email and sends code, (2) enters the 6-digit code, (3) sets a new password that passes strength validation, (4) the successful reset revokes that account's prior access and refresh tokens, (5) sees success state and is redirected to /sign-in",
       "outcomes": [
         "success",
         "error",
@@ -371,7 +371,7 @@
         "shared"
       ],
       "priority": "P1",
-      "description": "Unauthenticated user accessing protected routes is redirected to /sign-in",
+      "description": "User without an access cookie, including after a definitive refresh 401 clears a revoked session's cookies, accessing a protected route is redirected to /sign-in",
       "outcomes": [
         "success",
         "error"
@@ -850,7 +850,7 @@
         "admin"
       ],
       "priority": "P2",
-      "description": "User with valid tokens accesses protected route; expired access token triggers refresh",
+      "description": "User with tokens from the current credential generation accesses a protected route; expired access token triggers refresh. A password change or reset makes earlier access and refresh tokens fail, clears their browser cookies after refresh 401, and a fresh sign-in with the new password restores protected access",
       "outcomes": [
         "success",
         "failure"
@@ -1732,7 +1732,7 @@
         "veterinarian"
       ],
       "priority": "P2",
-      "description": "Authenticated user changes their password via PATCH /api/auth/update_password/ from the profile edit page; requires current password confirmation and new password strength validation before saving.",
+      "description": "Backend-only authenticated password-change contract: POST /api/auth/update_password/ requires the current password and a strong new password. Success advances the account credential generation, revokes that account's earlier access and refresh tokens, and permits a fresh sign-in with the new password; no password-change form is reachable in the UI",
       "expectedSpecs": 0,
       "knownGaps": [
         "No reachable UI as of 2026-07-04: /my-profile/edit has no password fields and API_ENDPOINTS.UPDATE_PASSWORD is referenced by no page/store (dead endpoint). Restore expectedSpecs to 1 when a password-change form is wired up."
