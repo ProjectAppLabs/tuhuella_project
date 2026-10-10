@@ -105,11 +105,15 @@ de revocación aprobada corresponde a esos dos endpoints públicos; no certifica
 cambios de contraseña realizados por herramientas de mantenimiento.
 
 El E2E inicial confirmó ambos 401, pero esperaba un redirect automático que la
-pantalla de perfil existente no realiza al quedar sin usuario. El spec final
-en `6568f81001e9f939c2e4d66fe7b102c63837145c` exige cierre observable de sesión,
-rechazo de una nueva navegación protegida y acceso con la contraseña nueva.
-No se modifica esa pantalla ni se cuenta el primer E2E como aprobación. Su
-aceptación en navegador corresponde al manifest de la combinación final.
+pantalla de perfil existente no realiza al quedar sin usuario. Una segunda
+ejecución detectó que el cambio de URL precede a la carga del perfil. El spec
+final en `9b346618d2f979550622cb096a83a5231facf946` espera login y validación 200
+con la identidad concreta, ambos 401 al revocar, cierre observable de sesión,
+rechazo de una nueva navegación protegida y perfil con la contraseña nueva.
+Pasó un caso real en 52,094 s, sin mocks, unexpected ni flaky. No se modifica
+esa pantalla; los runs rojos anteriores se conservan sin contarlos como
+aprobación. Su aceptación conjunta corresponde al manifest de la combinación
+final, servido por procesos nuevos en su SHA exacto.
 
 ## Ocho causas elegibles pendientes por cupo
 
