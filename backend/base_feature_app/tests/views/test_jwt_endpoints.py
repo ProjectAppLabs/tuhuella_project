@@ -1,3 +1,5 @@
+"""Verify the public token endpoint contract and shared login controls."""
+
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
@@ -13,6 +15,7 @@ from base_feature_app.views.auth import SignInThrottle
 
 @pytest.fixture(autouse=True)
 def clear_token_throttle_cache():
+    """Isolate the shared login quota for each token test."""
     cache.clear()
     yield
     cache.clear()
@@ -26,11 +29,13 @@ def fast_token_password_hashing(settings):
 
 @pytest.fixture
 def token_user(db):
+    """Create an active account with known token credentials."""
     return UserFactory(email='token@example.com', password='StrongTokenPass123!')
 
 
 @pytest.fixture
 def captcha_enabled(settings):
+    """Require reCAPTCHA verification for token requests."""
     settings.DEBUG = False
     settings.RECAPTCHA_SECRET_KEY = 'test-recaptcha-secret'
 
@@ -40,6 +45,7 @@ TOKEN_CREDENTIALS = {'email': 'token@example.com', 'password': 'StrongTokenPass1
 
 @pytest.mark.django_db
 def test_token_obtain_pair_with_email_success(api_client):
+    """Issue usable tokens through the public URL and renew the returned refresh token."""
     User = get_user_model()
     User.objects.create_user(email='token@example.com', password='pass1234')
 
@@ -63,6 +69,7 @@ def test_token_obtain_pair_with_email_success(api_client):
 @pytest.mark.django_db
 @pytest.mark.parametrize('missing_field', ['email', 'password'])
 def test_token_obtain_pair_preserves_missing_field_errors(api_client, missing_field):
+    """Return native field errors when a required credential is absent."""
     payload = TOKEN_CREDENTIALS.copy()
     payload.pop(missing_field)
 
@@ -73,8 +80,9 @@ def test_token_obtain_pair_preserves_missing_field_errors(api_client, missing_fi
 
 
 @pytest.mark.django_db
-@pytest.mark.parametrize('field,value', [('email', {}), ('password', [])])
+@pytest.mark.parametrize(('field', 'value'), [('email', {}), ('password', [])])
 def test_token_obtain_pair_rejects_invalid_field_types(api_client, field, value):
+    """Reject credential values that cannot be validated as strings."""
     payload = {**TOKEN_CREDENTIALS, field: value}
 
     response = api_client.post(reverse('token_obtain_pair'), payload, format='json')
@@ -86,6 +94,7 @@ def test_token_obtain_pair_rejects_invalid_field_types(api_client, field, value)
 @pytest.mark.django_db
 @pytest.mark.parametrize('body', ['[]', 'null', '"plain"'])
 def test_token_obtain_pair_preserves_non_mapping_body_validation(api_client, captcha_enabled, body):
+    """Reject non-object JSON bodies without attempting CAPTCHA field access."""
     response = api_client.generic(
         'POST', reverse('token_obtain_pair'), body, content_type='application/json',
     )
@@ -101,6 +110,7 @@ def test_token_obtain_pair_preserves_non_mapping_body_validation(api_client, cap
     {'email': 'token@example.com', 'password': 'WrongPassword123!'},
 ], ids=['unknown-user', 'wrong-password'])
 def test_token_obtain_pair_rejects_invalid_credentials_with_401(api_client, token_user, payload):
+    """Return the native authentication challenge without changing the account."""
     response = api_client.post(reverse('token_obtain_pair'), payload, format='json')
 
     assert response.status_code == status.HTTP_401_UNAUTHORIZED
@@ -113,6 +123,7 @@ def test_token_obtain_pair_rejects_invalid_credentials_with_401(api_client, toke
 
 @pytest.mark.django_db
 def test_token_obtain_pair_rejects_inactive_user(api_client, token_user):
+    """Deny token issuance for an inactive account."""
     token_user.is_active = False
     token_user.save(update_fields=['is_active'])
 
@@ -128,6 +139,7 @@ def test_token_obtain_pair_rejects_inactive_user(api_client, token_user):
 
 @pytest.mark.django_db
 def test_token_obtain_pair_rejects_archived_user(api_client, token_user):
+    """Deny token issuance for an archived account that remains active."""
     archived_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
     token_user.archived_at = archived_at
     token_user.save(update_fields=['archived_at'])
@@ -144,11 +156,12 @@ def test_token_obtain_pair_rejects_archived_user(api_client, token_user):
 
 
 @pytest.mark.django_db
-@pytest.mark.parametrize('first,second', [
+@pytest.mark.parametrize(('first', 'second'), [
     ('sign_in', 'token_obtain_pair'),
     ('token_obtain_pair', 'sign_in'),
 ], ids=['sign-in-first', 'token-first'])
 def test_token_obtain_pair_shares_sign_in_rate_limit(api_client, monkeypatch, first, second):
+    """Share the login quota across both endpoint orders."""
     monkeypatch.setattr(SignInThrottle, 'get_rate', lambda self: '2/minute')
     payload = {'email': 'missing@example.com', 'password': 'WrongPassword123!'}
 
@@ -165,6 +178,7 @@ def test_token_obtain_pair_shares_sign_in_rate_limit(api_client, monkeypatch, fi
 
 @pytest.mark.django_db
 def test_token_obtain_pair_rejects_missing_recaptcha_when_enabled(api_client, token_user, captcha_enabled):
+    """Deny token issuance when a required CAPTCHA token is absent."""
     response = api_client.post(reverse('token_obtain_pair'), TOKEN_CREDENTIALS, format='json')
 
     assert response.status_code == status.HTTP_400_BAD_REQUEST
@@ -176,6 +190,7 @@ def test_token_obtain_pair_rejects_missing_recaptcha_when_enabled(api_client, to
 
 @pytest.mark.django_db
 def test_token_obtain_pair_rejects_failed_recaptcha(api_client, token_user, captcha_enabled, monkeypatch):
+    """Deny token issuance after the CAPTCHA service rejects verification."""
     monkeypatch.setattr(
         'base_feature_app.views.auth.requests.post',
         lambda *args, **kwargs: SimpleNamespace(json=lambda: {'success': False}),
@@ -194,6 +209,7 @@ def test_token_obtain_pair_rejects_failed_recaptcha(api_client, token_user, capt
 
 @pytest.mark.django_db
 def test_token_obtain_pair_accepts_valid_recaptcha(api_client, token_user, captcha_enabled, monkeypatch):
+    """Issue the token pair after the CAPTCHA service accepts verification."""
     monkeypatch.setattr(
         'base_feature_app.views.auth.requests.post',
         lambda *args, **kwargs: SimpleNamespace(json=lambda: {'success': True}),
@@ -209,6 +225,7 @@ def test_token_obtain_pair_accepts_valid_recaptcha(api_client, token_user, captc
 
 @pytest.mark.django_db
 def test_token_obtain_pair_preserves_ignored_authorization_header(api_client, token_user):
+    """Accept valid credentials despite an unrelated invalid bearer token."""
     api_client.credentials(HTTP_AUTHORIZATION='Bearer invalid-token')
 
     response = api_client.post(reverse('token_obtain_pair'), TOKEN_CREDENTIALS, format='json')
@@ -219,6 +236,7 @@ def test_token_obtain_pair_preserves_ignored_authorization_header(api_client, to
 
 @pytest.mark.django_db
 def test_token_obtain_pair_does_not_update_last_login(api_client, token_user):
+    """Preserve the previous login timestamp when issuing a token pair."""
     last_login = datetime(2026, 1, 1, tzinfo=timezone.utc)
     token_user.last_login = last_login
     token_user.save(update_fields=['last_login'])
@@ -232,6 +250,7 @@ def test_token_obtain_pair_does_not_update_last_login(api_client, token_user):
 
 @pytest.mark.django_db
 def test_token_obtain_pair_preserves_email_case(api_client):
+    """Authenticate the stored email without rewriting its case."""
     user = UserFactory(email='CaseSensitive@example.com', password='StrongTokenPass123!')
 
     response = api_client.post(reverse('token_obtain_pair'), {

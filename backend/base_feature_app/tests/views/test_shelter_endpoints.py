@@ -20,7 +20,7 @@ ARCHIVED_AT = datetime(2026, 1, 1, tzinfo=dt_timezone.utc)
 
 @pytest.fixture(autouse=True)
 def fast_shelter_password_hashing(settings):
-    """These permission requests use real users but do not test hashing cost."""
+    """Avoid production hashing costs in permission request tests."""
     settings.PASSWORD_HASHERS = ['django.contrib.auth.hashers.MD5PasswordHasher']
 
 
@@ -38,6 +38,7 @@ def _shelter_row(response):
 
 @pytest.mark.django_db
 def test_public_shelter_responses_omit_owner_email(api_client, shelter, shelter_read_endpoint):
+    """Hide the account email in anonymous shelter responses."""
     response = api_client.get(shelter_read_endpoint)
 
     assert response.status_code == status.HTTP_200_OK
@@ -48,6 +49,7 @@ def test_public_shelter_responses_omit_owner_email(api_client, shelter, shelter_
 @pytest.mark.django_db
 @pytest.mark.parametrize('role', ['adopter', 'shelter_admin'])
 def test_unrelated_user_shelter_responses_omit_owner_email(api_client, shelter, shelter_read_endpoint, role):
+    """Hide the account email from users outside the shelter."""
     user = UserFactory(role=role, password=None)
     api_client.force_authenticate(user=user)
 
@@ -60,6 +62,7 @@ def test_unrelated_user_shelter_responses_omit_owner_email(api_client, shelter, 
 
 @pytest.mark.django_db
 def test_shelter_owner_responses_include_owner_email(shelter_admin_client, shelter, shelter_read_endpoint):
+    """Retain the account email for the shelter owner."""
     response = shelter_admin_client.get(shelter_read_endpoint)
 
     assert response.status_code == status.HTTP_200_OK
@@ -68,6 +71,7 @@ def test_shelter_owner_responses_include_owner_email(shelter_admin_client, shelt
 
 @pytest.mark.django_db
 def test_shelter_team_responses_include_owner_email(api_client, shelter, shelter_read_endpoint):
+    """Retain the account email for a member of the shelter team."""
     member = ShelterAdminUserFactory(password=None)
     ShelterMembershipFactory(shelter=shelter, user=member)
     api_client.force_authenticate(user=member)
@@ -79,12 +83,13 @@ def test_shelter_team_responses_include_owner_email(api_client, shelter, shelter
 
 
 @pytest.mark.django_db
-@pytest.mark.parametrize('role,is_superuser', [
+@pytest.mark.parametrize(('role', 'is_superuser'), [
     ('admin', False), ('web_manager', False), ('adopter', True),
 ], ids=['admin', 'web-manager', 'superuser'])
 def test_platform_operator_shelter_responses_include_owner_email(
     api_client, shelter, shelter_read_endpoint, role, is_superuser,
 ):
+    """Retain the account email for each authorized platform operator."""
     operator = UserFactory(role=role, is_superuser=is_superuser, password=None)
     api_client.force_authenticate(user=operator)
 
@@ -96,6 +101,7 @@ def test_platform_operator_shelter_responses_include_owner_email(
 
 @pytest.mark.django_db
 def test_owner_me_keeps_shelter_owner_email(shelter_admin_client, shelter):
+    """Retain the account email in the owner panel list."""
     response = shelter_admin_client.get(reverse('shelter-list'), {'owner': 'me'})
 
     assert response.status_code == status.HTTP_200_OK
@@ -104,6 +110,7 @@ def test_owner_me_keeps_shelter_owner_email(shelter_admin_client, shelter):
 
 @pytest.mark.django_db
 def test_team_member_owner_me_keeps_shelter_owner_email(api_client, shelter):
+    """Retain the account email in the team member panel list."""
     member = ShelterAdminUserFactory(password=None)
     ShelterMembershipFactory(shelter=shelter, user=member)
     api_client.force_authenticate(user=member)

@@ -1,26 +1,31 @@
+"""Verify platform management permissions, filters and response fields."""
+
 import pytest
 
+from base_feature_app.models import AdoptionApplication
 from base_feature_app.tests.factories import (
     AdoptionApplicationFactory,
     ShelterFactory,
     UserFactory,
 )
-from base_feature_app.models import AdoptionApplication
 
 
 @pytest.fixture
 def web_manager(db):
+    """Create an account authorized to manage platform records."""
     return UserFactory(email='manager@example.com', role='web_manager')
 
 
 @pytest.fixture
 def web_manager_client(api_client, web_manager):
+    """Authenticate requests as a web manager."""
     api_client.force_authenticate(user=web_manager)
     return api_client
 
 
 @pytest.mark.django_db
 def test_web_manager_sees_all_applications(web_manager_client):
+    """Expose applications across shelters to the web manager."""
     AdoptionApplicationFactory.create_batch(3)
 
     response = web_manager_client.get('/api/admin/applications/')
@@ -31,6 +36,7 @@ def test_web_manager_sees_all_applications(web_manager_client):
 
 @pytest.mark.django_db
 def test_adopter_is_forbidden_from_global_applications(authenticated_client):
+    """Deny adopters access to the global application list."""
     AdoptionApplicationFactory()
 
     response = authenticated_client.get('/api/admin/applications/')
@@ -40,6 +46,7 @@ def test_adopter_is_forbidden_from_global_applications(authenticated_client):
 
 @pytest.mark.django_db
 def test_shelter_applications_filter_scopes_to_shelter(web_manager_client):
+    """Restrict the shelter application list to the requested shelter."""
     shelter_a = ShelterFactory()
     shelter_b = ShelterFactory()
     AdoptionApplicationFactory(animal__shelter=shelter_a)
@@ -56,6 +63,7 @@ def test_shelter_applications_filter_scopes_to_shelter(web_manager_client):
 
 @pytest.mark.django_db
 def test_shelter_admin_cannot_call_shelter_applications(shelter_admin_client):
+    """Deny shelter administrators access to the platform application endpoint."""
     other = ShelterFactory()
     AdoptionApplicationFactory(animal__shelter=other)
 
@@ -79,6 +87,7 @@ def test_admin_shelters_list_returns_all_shelters(web_manager_client):
 
 @pytest.mark.django_db
 def test_admin_shelters_list_keeps_owner_email(web_manager_client):
+    """Retain owner account emails in the administrative shelter list."""
     shelter = ShelterFactory()
 
     response = web_manager_client.get('/api/admin/shelters/all/')
@@ -110,7 +119,7 @@ def test_admin_shelters_list_filters_by_verification_status(web_manager_client):
 
 @pytest.mark.django_db
 def test_admin_shelters_list_filters_by_city(web_manager_client):
-    """city query param restricts results to shelters in matching city."""
+    """City filters restrict results to shelters in the matching city."""
     ShelterFactory(city='Bogotá')
     ShelterFactory(city='Medellín')
 
@@ -125,7 +134,7 @@ def test_admin_shelters_list_filters_by_city(web_manager_client):
 
 @pytest.mark.django_db
 def test_admin_applications_list_filters_by_status(web_manager_client):
-    """status query param restricts results to applications with matching status."""
+    """Status filters restrict results to applications with matching status."""
     AdoptionApplicationFactory(status=AdoptionApplication.Status.SUBMITTED)
     AdoptionApplicationFactory(status=AdoptionApplication.Status.REVIEWING)
 
@@ -138,7 +147,7 @@ def test_admin_applications_list_filters_by_status(web_manager_client):
 
 @pytest.mark.django_db
 def test_admin_applications_list_filters_by_shelter(web_manager_client):
-    """shelter query param restricts results to applications for animals in that shelter."""
+    """Shelter filters restrict applications to animals in that shelter."""
     shelter_a = ShelterFactory()
     shelter_b = ShelterFactory()
     AdoptionApplicationFactory(animal__shelter=shelter_a)
@@ -169,7 +178,7 @@ def test_admin_applications_list_returns_pagination_metadata(web_manager_client)
 
 @pytest.mark.django_db
 def test_shelter_applications_list_filters_by_status(web_manager_client):
-    """status query param on shelter-specific endpoint filters by application status."""
+    """Status filters on the shelter endpoint restrict application results."""
     shelter = ShelterFactory()
     AdoptionApplicationFactory(animal__shelter=shelter, status=AdoptionApplication.Status.SUBMITTED)
     AdoptionApplicationFactory(animal__shelter=shelter, status=AdoptionApplication.Status.REVIEWING)
