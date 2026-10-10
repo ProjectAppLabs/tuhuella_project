@@ -178,6 +178,15 @@ Los registros globales de flujos fueron revalidados por el Analyst; un cambio
 posterior sólo de aserciones no altera su semántica aunque la heurística de
 fechas incluya archivos de tests bajo `backend/**/views/*.py`.
 
+El Verifier ejecutó 133 casos backend y un E2E real en la combinación
+`bce16062788242ae2216510dab80d14a18799d64`, todos en verde. El gate externo
+descubrió ocho docstrings de fixtures obligatorios ausentes; Seguridad los
+completó y sustituyó la aserción de ausencia por `toBeHidden()` en
+`728ae9c787e4f02adfbb168676a346dc10e65951`. Sólo cambiaron tres tests. ESLint
+real y gate de esos tres archivos pasaron 100/100, sin hallazgos Ruff/ESLint.
+La aceptación final repite E2E y gate combinado; conserva el SHA de ejecución
+backend original y demuestra que su lógica y el código backend no cambiaron.
+
 Entorno aislado propio: Python 3.12.3 y requisitos del lock de la base; Django
 6.0.8, DRF 3.18 y SimpleJWT 5.5.1. Next 16.3.8, React 19.2.8 y Node 20.20.2.
 Sin archivos `.env` de producción, DB del servicio, migraciones del despliegue
