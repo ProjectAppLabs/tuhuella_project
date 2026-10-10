@@ -47,6 +47,7 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
+    auth_version = models.PositiveIntegerField(default=0, editable=False)
     date_joined = models.DateTimeField(default=timezone.now)
     terms_accepted_at = models.DateTimeField(null=True, blank=True)
     terms_version = models.CharField(max_length=20, blank=True, default='')
