@@ -1,0 +1,21 @@
+{% extends "admin/base_site.html" %}
+{% load i18n admin_urls %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">{% translate "Home" %}</a>
+  &rsaquo; {% if archive_changelist_url %}<a href="{{ archive_changelist_url }}">{{ opts.verbose_name_plural|capfirst }}</a>{% else %}{{ opts.verbose_name_plural|capfirst }}{% endif %}
+  &rsaquo; {{ object }} &rsaquo; {% translate "Archive" %}
+</div>
+{% endblock %}
+
+{% block content %}
+  <p>{% blocktranslate with name=object %}Archive “{{ name }}”? Related records and files will be preserved.{% endblocktranslate %}</p>
+  <form method="post">{% csrf_token %}
+    <input type="hidden" name="post" value="yes">
+    {% if is_popup %}<input type="hidden" name="{{ is_popup_var }}" value="1">{% endif %}
+    {% if to_field %}<input type="hidden" name="{{ to_field_var }}" value="{{ to_field }}">{% endif %}
+    <input type="submit" value="{% translate 'Archive' %}">
+    <a href="{{ archive_cancel_url }}" class="button">{% translate "Cancel" %}</a>
+  </form>
+{% endblock %}

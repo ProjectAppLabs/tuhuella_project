@@ -14,7 +14,6 @@ from rest_framework import status
 from rest_framework.throttling import AnonRateThrottle
 from rest_framework.views import exception_handler
 from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
-from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from rest_framework_simplejwt.settings import api_settings as jwt_settings
 from django.contrib.auth.hashers import check_password, make_password
 from django.contrib.auth import get_user_model
@@ -22,10 +21,13 @@ from django.contrib.auth.models import update_last_login
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 from django.conf import settings
+from django.db import transaction
+from django.db.models import F
 
 import requests
 
 from base_feature_app.models import PasswordCode
+from base_feature_project.serializers import VersionedTokenObtainPairSerializer
 from base_feature_app.utils.auth_utils import (
     generate_auth_tokens, 
     send_password_reset_code,
@@ -76,7 +78,7 @@ class SignInThrottle(AnonRateThrottle):
 @throttle_classes([SignInThrottle])
 def obtain_token_pair(request):
     """Preserve the token API contract while sharing the sign-in controls."""
-    serializer = TokenObtainPairSerializer(data=request.data, context={'request': request})
+    serializer = VersionedTokenObtainPairSerializer(data=request.data, context={'request': request})
     # Invalid JSON shapes still reach the serializer's native validation rather
     # than calling .get() on a list, string or null body.
     if isinstance(request.data, Mapping):
@@ -172,6 +174,7 @@ def sign_up(request):
 
 
 @api_view(['POST'])
+@authentication_classes([])
 @permission_classes([AllowAny])
 @throttle_classes([SignInThrottle])
 def sign_in(request):
@@ -232,6 +235,7 @@ def sign_in(request):
 
 
 @api_view(['POST'])
+@authentication_classes([])
 @permission_classes([AllowAny])
 @throttle_classes([SignInThrottle])
 def google_login(request):
@@ -265,15 +269,15 @@ def google_login(request):
         if tokeninfo.status_code == 200:
             payload = tokeninfo.json()
         else:
-            logger.warning('Google tokeninfo rejected credential: status=%s body=%s', tokeninfo.status_code, tokeninfo.text)
+            logger.warning('Google token validation failed: type=UpstreamRejection')
     except (requests.RequestException, ValueError) as exc:
-        logger.warning('Google token validation failed: %s', exc)
+        logger.warning('Google token validation failed: type=%s', type(exc).__name__)
 
     if payload is not None:
         aud = payload.get('aud', '')
         allowed_auds = [v.strip() for v in (settings.GOOGLE_OAUTH_CLIENT_ID or '').split(',') if v.strip()]
         if allowed_auds and aud not in allowed_auds:
-            logger.warning('Google aud mismatch. aud=%s allowed=%s', aud, allowed_auds)
+            logger.warning('Google token validation failed: type=AudienceMismatch')
             aud_mismatch = True
             payload = None
 
@@ -328,7 +332,7 @@ def google_login(request):
         if not user.last_name and family_name:
             user.last_name = family_name
         if user.first_name or user.last_name:
-            user.save()
+            user.save(update_fields=['first_name', 'last_name'])
 
     if user.archived_at or not user.is_active:
         return Response(
@@ -395,6 +399,7 @@ def send_passcode(request):
 @api_view(['POST'])
 @permission_classes([AllowAny])
 @throttle_classes([PasswordResetVerifyThrottle])
+@transaction.atomic
 def verify_passcode_and_reset_password(request):
     """
     Verify passcode and reset password.
@@ -415,7 +420,7 @@ def verify_passcode_and_reset_password(request):
         )
 
     try:
-        user = User.objects.get(email=email)
+        user = User.objects.select_for_update().get(email=email)
     except User.DoesNotExist:
         return Response(
             {'error': 'Invalid email or code'},
@@ -424,7 +429,7 @@ def verify_passcode_and_reset_password(request):
 
     # Find valid code
     try:
-        password_code = user.password_codes.filter(
+        password_code = user.password_codes.select_for_update().filter(
             code=code,
             used=False
         ).first()
@@ -452,7 +457,8 @@ def verify_passcode_and_reset_password(request):
         )
 
     user.password = make_password(new_password)
-    user.save(update_fields=['password'])
+    user.auth_version = F('auth_version') + 1
+    user.save(update_fields=['password', 'auth_version'])
 
     password_code.used = True
     password_code.save(update_fields=['used'])
@@ -465,6 +471,7 @@ def verify_passcode_and_reset_password(request):
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
+@transaction.atomic
 def update_password(request):
     """
     Update user password (requires authentication).
@@ -482,7 +489,9 @@ def update_password(request):
             status=status.HTTP_400_BAD_REQUEST
         )
     
-    user = request.user
+    user = User.objects.select_for_update().get(pk=request.user.pk)
+    if user.auth_version != request.user.auth_version:
+        raise InvalidToken('Token is invalid or expired')
     
     if not check_password(current_password, user.password):
         return Response(
@@ -499,7 +508,8 @@ def update_password(request):
         )
 
     user.password = make_password(new_password)
-    user.save()
+    user.auth_version = F('auth_version') + 1
+    user.save(update_fields=['password', 'auth_version'])
     
     return Response(
         {'message': 'Password updated successfully'},

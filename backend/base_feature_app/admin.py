@@ -3,10 +3,17 @@ from urllib.parse import urlencode
 
 from django.conf import settings
 from django.contrib import admin, messages
+from django.contrib.admin import helpers
+from django.contrib.admin.models import CHANGE, LogEntry
+from django.contrib.admin.options import IS_POPUP_VAR
+from django.contrib.admin.templatetags.admin_urls import add_preserved_filters
+from django.contrib.admin.utils import quote
 from django.contrib.auth.admin import UserAdmin
 from django.core.exceptions import PermissionDenied
+from django.db import transaction
 from django.http import HttpResponseRedirect
 from django.shortcuts import get_object_or_404
+from django.template.response import TemplateResponse
 from django.urls import path, reverse
 from django.utils import timezone
 from django.utils.html import format_html
@@ -30,11 +37,138 @@ from .utils.auth_utils import generate_auth_tokens
 logger = logging.getLogger(__name__)
 
 
+class ArchiveAdminMixin:
+    """Use the existing archive policy throughout Django's delete workflow."""
+
+    change_form_template = 'admin/archive_change_form.html'
+    delete_confirmation_template = 'admin/archive_confirmation.html'
+    archive_updates = {}
+
+    def get_deleted_objects(self, objs, request):
+        # Archiving does not collect children or consult their delete permissions.
+        objects = list(objs)
+        denied = any(not self.has_delete_permission(request, obj) for obj in objects)
+        permissions = {self.opts.verbose_name} if denied else set()
+        return (
+            [str(obj) for obj in objects],
+            {self.opts.verbose_name_plural: len(objects)},
+            permissions,
+            [],
+        )
+
+    def delete_model(self, request, obj):
+        self.delete_queryset(
+            request, self.model._default_manager.using(obj._state.db).filter(pk=obj.pk),
+        )
+
+    def delete_queryset(self, request, queryset):
+        queryset.update(archived_at=timezone.now(), **self.archive_updates)
+
+    def log_deletions(self, request, queryset):
+        return LogEntry.objects.log_actions(
+            user_id=request.user.pk,
+            queryset=queryset,
+            action_flag=CHANGE,
+            change_message=str(_('Archived.')),
+        )
+
+    def delete_view(self, request, object_id, extra_context=None):
+        if request.method == 'POST' and request.POST.get('post') != 'yes':
+            raise PermissionDenied
+        # Django supplies CSRF, object lookup, to_field validation and atomicity.
+        return super().delete_view(request, object_id, extra_context)
+
+    def _archive_return_url(self, request, obj=None):
+        if obj is not None and self.has_view_or_change_permission(request, obj):
+            url = reverse(
+                f'admin:{self.opts.app_label}_{self.opts.model_name}_change',
+                args=[quote(obj.pk)], current_app=self.admin_site.name,
+            )
+        elif self.has_view_or_change_permission(request):
+            url = reverse(
+                f'admin:{self.opts.app_label}_{self.opts.model_name}_changelist',
+                current_app=self.admin_site.name,
+            )
+        else:
+            url = reverse('admin:index', current_app=self.admin_site.name)
+        return add_preserved_filters(
+            {'preserved_filters': self.get_preserved_filters(request), 'opts': self.opts},
+            url,
+        )
+
+    def render_delete_form(self, request, context):
+        context['title'] = _('Archive')
+        context['archive_cancel_url'] = self._archive_return_url(request, context['object'])
+        context['archive_changelist_url'] = (
+            self._archive_return_url(request) if self.has_view_or_change_permission(request) else None
+        )
+        return super().render_delete_form(request, context)
+
+    def response_delete(self, request, obj_display, obj_id):
+        if IS_POPUP_VAR in request.POST:
+            # Keep Django's related-selector response, removing an archived choice.
+            return super().response_delete(request, obj_display, obj_id)
+        self.message_user(
+            request,
+            _('The %(name)s “%(obj)s” was archived successfully.')
+            % {'name': self.opts.verbose_name, 'obj': obj_display},
+            messages.SUCCESS,
+        )
+        return HttpResponseRedirect(self._archive_return_url(request))
+
+    def get_actions(self, request):
+        actions = super().get_actions(request)
+        if 'delete_selected' in actions:
+            actions['delete_selected'] = (
+                type(self).archive_selected,
+                'delete_selected',
+                _('Archive selected %(verbose_name_plural)s')
+                % {'verbose_name_plural': self.opts.verbose_name_plural},
+            )
+        return actions
+
+    @admin.action(permissions=['delete'])
+    def archive_selected(self, request, queryset):
+        if 'post' in request.POST and request.POST['post'] != 'yes':
+            raise PermissionDenied
+        with transaction.atomic(using=queryset.db):
+            objects = list(queryset.select_for_update())
+            permissions = self.get_deleted_objects(objects, request)[2]
+            if request.POST.get('post') == 'yes':
+                if permissions:
+                    raise PermissionDenied
+                if objects:
+                    self.log_deletions(request, objects)
+                    self.delete_queryset(request, queryset.filter(pk__in=[obj.pk for obj in objects]))
+                    self.message_user(
+                        request,
+                        _('Archived %(count)d %(name)s.')
+                        % {'count': len(objects), 'name': self.opts.verbose_name_plural},
+                        messages.SUCCESS,
+                    )
+                return None
+
+        request.current_app = self.admin_site.name
+        context = {
+            **self.admin_site.each_context(request),
+            'title': _('Archive selected objects'),
+            'opts': self.opts,
+            'queryset': objects,
+            'perms_lacking': permissions,
+            'action_checkbox_name': helpers.ACTION_CHECKBOX_NAME,
+            'archive_cancel_url': self._archive_return_url(request),
+            'archive_changelist_url': self._archive_return_url(request),
+            'media': self.media,
+        }
+        return TemplateResponse(request, 'admin/archive_selected_confirmation.html', context)
+
+
 # ============================================================================
 # USER MANAGEMENT
 # ============================================================================
 
-class MiHuellaUserAdmin(UserAdmin):
+class MiHuellaUserAdmin(ArchiveAdminMixin, UserAdmin):
+    archive_updates = {'is_active': False}
     ordering = ('email',)
     list_display = ('email', 'first_name', 'last_name', 'role', 'city', 'is_staff', 'is_active')
     list_filter = ('role', 'is_staff', 'is_active')
@@ -70,10 +204,6 @@ class MiHuellaUserAdmin(UserAdmin):
             url,
         )
     impersonate_link.short_description = 'Impersonate'
-
-    def delete_queryset(self, request, queryset):
-        now = timezone.now()
-        queryset.update(archived_at=now, is_active=False)
 
     def get_urls(self):
         urls = super().get_urls()
@@ -130,17 +260,13 @@ class PasswordCodeAdmin(admin.ModelAdmin):
 # SHELTER MANAGEMENT
 # ============================================================================
 
-class ShelterAdmin(AttachmentsAdminMixin, admin.ModelAdmin):
+class ShelterAdmin(ArchiveAdminMixin, AttachmentsAdminMixin, admin.ModelAdmin):
     list_display = ('name', 'city', 'verification_status', 'owner', 'archived_at', 'created_at')
     search_fields = ('name', 'legal_name', 'city', 'owner__email')
     list_filter = ('verification_status', 'city')
     readonly_fields = ('created_at', 'updated_at', 'verified_at')
 
-    def delete_queryset(self, request, queryset):
-        queryset.update(archived_at=timezone.now())
-
-
-class ShelterApplicationAdmin(AttachmentsAdminMixin, admin.ModelAdmin):
+class ShelterApplicationAdmin(ArchiveAdminMixin, AttachmentsAdminMixin, admin.ModelAdmin):
     list_display = ('shelter_name', 'applicant', 'city', 'status', 'submitted_at', 'reviewed_at')
     search_fields = ('shelter_name', 'legal_name', 'tax_id', 'applicant__email', 'city')
     list_filter = ('status', 'city')
@@ -153,9 +279,6 @@ class ShelterApplicationAdmin(AttachmentsAdminMixin, admin.ModelAdmin):
         (_('Motivation'), {'fields': ('motivation', 'previous_experience', 'capacity_estimate')}),
     )
 
-    def delete_queryset(self, request, queryset):
-        queryset.update(archived_at=timezone.now())
-
 
 # ============================================================================
 # ANIMAL MANAGEMENT
@@ -167,7 +290,8 @@ class AnimalDiseaseScreeningInline(admin.TabularInline):
     fields = ('disease_key', 'result', 'tested_on', 'notes')
 
 
-class AnimalAdmin(AttachmentsAdminMixin, admin.ModelAdmin):
+class AnimalAdmin(ArchiveAdminMixin, AttachmentsAdminMixin, admin.ModelAdmin):
+    archive_updates = {'status': Animal.Status.ARCHIVED}
     list_display = ('name', 'species', 'breed', 'age_range', 'size', 'status', 'energy_level', 'shelter', 'archived_at')
     search_fields = ('name', 'breed', 'shelter__name', 'microchip_id')
     list_filter = (
@@ -178,8 +302,6 @@ class AnimalAdmin(AttachmentsAdminMixin, admin.ModelAdmin):
     readonly_fields = ('created_at', 'updated_at')
     inlines = [AnimalDiseaseScreeningInline]
 
-    def delete_queryset(self, request, queryset):
-        queryset.update(archived_at=timezone.now(), status=Animal.Status.ARCHIVED)
     fieldsets = (
         (None, {
             'fields': ('shelter', 'name', 'species', 'breed', 'age_range', 'gender', 'size', 'status', 'archived_at'),
@@ -226,7 +348,7 @@ class ClinicalHistoryEntryInline(admin.TabularInline):
     readonly_fields = ('author',)
 
 
-class PostAdoptionFollowUpAdmin(admin.ModelAdmin):
+class PostAdoptionFollowUpAdmin(ArchiveAdminMixin, admin.ModelAdmin):
     list_display = ('id', 'adopter', 'animal', 'assigned_veterinarian', 'status', 'scheduled_date')
     list_filter = ('status', 'scheduled_date')
     search_fields = ('adopter__email', 'animal__name', 'assigned_veterinarian__email')
@@ -241,13 +363,10 @@ class ClinicalHistoryEntryAdmin(admin.ModelAdmin):
     readonly_fields = ('created_at',)
 
 
-class FavoriteAdmin(admin.ModelAdmin):
+class FavoriteAdmin(ArchiveAdminMixin, admin.ModelAdmin):
     list_display = ('user', 'animal', 'archived_at', 'created_at')
     search_fields = ('user__email', 'animal__name')
     readonly_fields = ('created_at',)
-
-    def delete_queryset(self, request, queryset):
-        queryset.update(archived_at=timezone.now())
 
 
 class ShelterMembershipAdmin(admin.ModelAdmin):
@@ -281,24 +400,17 @@ class PaymentHistoryAdmin(admin.ModelAdmin):
 # ADOPTION MANAGEMENT
 # ============================================================================
 
-class AdoptionApplicationAdmin(admin.ModelAdmin):
+class AdoptionApplicationAdmin(ArchiveAdminMixin, admin.ModelAdmin):
     list_display = ('user', 'animal', 'status', 'next_follow_up_due_at', 'archived_at', 'created_at', 'reviewed_at')
     search_fields = ('user__email', 'animal__name')
     list_filter = ('status',)
     readonly_fields = ('created_at', 'updated_at')
 
-    def delete_queryset(self, request, queryset):
-        queryset.update(archived_at=timezone.now())
-
-
-class AdoptionApplicationEventAdmin(admin.ModelAdmin):
+class AdoptionApplicationEventAdmin(ArchiveAdminMixin, admin.ModelAdmin):
     list_display = ('id', 'application', 'created_by', 'event_date', 'archived_at', 'created_at')
     search_fields = ('application__animal__name', 'application__user__email', 'created_by__email', 'description')
     list_filter = ('event_date',)
     readonly_fields = ('created_at', 'updated_at')
-
-    def delete_queryset(self, request, queryset):
-        queryset.update(archived_at=timezone.now())
 
 
 class AdopterIntentAdmin(admin.ModelAdmin):
@@ -319,15 +431,12 @@ class ShelterInviteAdmin(admin.ModelAdmin):
 # CAMPAIGN & DONATIONS
 # ============================================================================
 
-class CampaignAdmin(AttachmentsAdminMixin, admin.ModelAdmin):
+class CampaignAdmin(ArchiveAdminMixin, AttachmentsAdminMixin, admin.ModelAdmin):
     list_display = ('title_es', 'shelter', 'status', 'approval_status', 'reviewed_by',
                     'goal_amount', 'raised_amount', 'progress_percentage', 'archived_at')
     search_fields = ('title_es', 'title_en', 'shelter__name')
     list_filter = ('status', 'approval_status')
     readonly_fields = ('created_at', 'updated_at', 'submitted_at', 'reviewed_at', 'reviewed_by')
-
-    def delete_queryset(self, request, queryset):
-        queryset.update(archived_at=timezone.now())
 
 
 class CampaignMessageAdmin(admin.ModelAdmin):
@@ -337,57 +446,39 @@ class CampaignMessageAdmin(admin.ModelAdmin):
     readonly_fields = ('created_at',)
 
 
-class DonationAdmin(admin.ModelAdmin):
+class DonationAdmin(ArchiveAdminMixin, admin.ModelAdmin):
     list_display = ('user', 'amount', 'status', 'destination', 'shelter', 'campaign', 'paid_at', 'archived_at')
     search_fields = ('user__email', 'shelter__name', 'campaign__title_es')
     list_filter = ('status',)
     readonly_fields = ('created_at', 'updated_at')
 
-    def delete_queryset(self, request, queryset):
-        queryset.update(archived_at=timezone.now())
-
-
-class SponsorshipAdmin(admin.ModelAdmin):
+class SponsorshipAdmin(ArchiveAdminMixin, admin.ModelAdmin):
     list_display = ('user', 'animal', 'amount', 'frequency', 'status', 'started_at', 'archived_at')
     search_fields = ('user__email', 'animal__name')
     list_filter = ('status', 'frequency')
     readonly_fields = ('created_at', 'updated_at')
 
-    def delete_queryset(self, request, queryset):
-        queryset.update(archived_at=timezone.now())
-
-
-class PaymentAdmin(admin.ModelAdmin):
+class PaymentAdmin(ArchiveAdminMixin, admin.ModelAdmin):
     list_display = ('provider', 'provider_reference', 'amount', 'status', 'paid_at', 'archived_at')
     search_fields = ('provider_reference',)
     list_filter = ('status', 'provider')
     readonly_fields = ('created_at', 'updated_at')
 
-    def delete_queryset(self, request, queryset):
-        queryset.update(archived_at=timezone.now())
-
-
-class SubscriptionAdmin(admin.ModelAdmin):
+class SubscriptionAdmin(ArchiveAdminMixin, admin.ModelAdmin):
     list_display = ('sponsorship', 'provider', 'interval', 'status', 'next_payment_at', 'archived_at')
     search_fields = ('provider_reference',)
     list_filter = ('status', 'interval')
     readonly_fields = ('created_at', 'updated_at')
-
-    def delete_queryset(self, request, queryset):
-        queryset.update(archived_at=timezone.now())
 
 
 # ============================================================================
 # CONTENT & NOTIFICATIONS
 # ============================================================================
 
-class UpdatePostAdmin(AttachmentsAdminMixin, admin.ModelAdmin):
+class UpdatePostAdmin(ArchiveAdminMixin, AttachmentsAdminMixin, admin.ModelAdmin):
     list_display = ('title_es', 'shelter', 'campaign', 'animal', 'archived_at', 'created_at')
     search_fields = ('title_es', 'title_en', 'shelter__name')
     readonly_fields = ('created_at', 'updated_at')
-
-    def delete_queryset(self, request, queryset):
-        queryset.update(archived_at=timezone.now())
 
 
 class NotificationPreferenceAdmin(admin.ModelAdmin):
@@ -403,7 +494,8 @@ class NotificationLogAdmin(admin.ModelAdmin):
     readonly_fields = ('created_at',)
 
 
-class BlogPostAdmin(AttachmentsAdminMixin, admin.ModelAdmin):
+class BlogPostAdmin(ArchiveAdminMixin, AttachmentsAdminMixin, admin.ModelAdmin):
+    archive_updates = {'is_published': False}
     list_display = ('title_es', 'slug', 'category', 'author', 'is_published', 'is_featured', 'published_at', 'archived_at', 'created_at')
     list_filter = ('is_published', 'is_featured', 'category', 'author')
     search_fields = ('title_es', 'title_en', 'slug', 'excerpt_es', 'excerpt_en')
@@ -431,10 +523,6 @@ class BlogPostAdmin(AttachmentsAdminMixin, admin.ModelAdmin):
             'fields': ('created_at', 'updated_at'),
         }),
     )
-
-    def delete_queryset(self, request, queryset):
-        now = timezone.now()
-        queryset.update(archived_at=now, is_published=False)
 
 
 # ============================================================================
@@ -567,7 +655,7 @@ class VolunteerPositionAdmin(admin.ModelAdmin):
     )
 
 
-class VolunteerApplicationAdmin(admin.ModelAdmin):
+class VolunteerApplicationAdmin(ArchiveAdminMixin, admin.ModelAdmin):
     list_display = ('user', 'position', 'status', 'archived_at', 'created_at')
     list_filter = ('status', 'position')
     search_fields = ('user__email', 'user__first_name', 'user__last_name')
@@ -577,9 +665,6 @@ class VolunteerApplicationAdmin(admin.ModelAdmin):
         (_('Application'), {'fields': ('position', 'motivation', 'status', 'archived_at')}),
         (_('Timestamps'), {'fields': ('created_at', 'updated_at')}),
     )
-
-    def delete_queryset(self, request, queryset):
-        queryset.update(archived_at=timezone.now())
 
 
 class StrategicAllyAdmin(AttachmentsAdminMixin, admin.ModelAdmin):
