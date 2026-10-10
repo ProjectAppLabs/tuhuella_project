@@ -19,8 +19,19 @@ test('requires fresh login after another session changes the password', {
   await page.goto('/es/sign-in?redirect=/my-profile');
   await page.getByLabel('Correo electrónico').fill(email);
   await page.getByLabel('Contraseña', { exact: true }).fill(oldPassword);
+  const initialLogin = page.waitForResponse(
+    (response) => response.url().endsWith('/auth/sign_in/') && response.request().method() === 'POST',
+  );
   await page.getByRole('button', { name: 'Iniciar sesión', exact: true }).click();
+  const initialLoginResponse = await initialLogin;
+  expect(initialLoginResponse.status()).toBe(200);
+  expect((await initialLoginResponse.json()).user.email).toBe(email);
   await expect(page).toHaveURL(/\/my-profile$/);
+  const initialValidation = page.waitForResponse(
+    (response) => response.url().endsWith('/auth/validate_token/') && response.status() === 200,
+  );
+  await page.goto('/es/my-profile');
+  expect((await (await initialValidation).json()).user.email).toBe(email);
   await expect(page.getByText(email, { exact: true })).toBeVisible();
 
   const passwordChange = await request.post('/api/auth/update_password/', {
@@ -46,9 +57,19 @@ test('requires fresh login after another session changes the password', {
   await expect(page).toHaveURL(/\/sign-in(?:\?|$)/);
   await page.getByLabel('Correo electrónico').fill(email);
   await page.getByLabel('Contraseña', { exact: true }).fill(newPassword);
+  const freshLogin = page.waitForResponse(
+    (response) => response.url().endsWith('/auth/sign_in/') && response.request().method() === 'POST',
+  );
   await page.getByRole('button', { name: 'Iniciar sesión', exact: true }).click();
+  const freshLoginResponse = await freshLogin;
+  expect(freshLoginResponse.status()).toBe(200);
+  expect((await freshLoginResponse.json()).user.email).toBe(email);
   await expect(page).not.toHaveURL(/\/sign-in/);
+  const freshValidation = page.waitForResponse(
+    (response) => response.url().endsWith('/auth/validate_token/') && response.status() === 200,
+  );
   await page.goto('/es/my-profile');
+  expect((await (await freshValidation).json()).user.email).toBe(email);
   await expect(page).toHaveURL(/\/my-profile$/);
   await expect(page.getByText(email, { exact: true })).toBeVisible();
 });
