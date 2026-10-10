@@ -118,7 +118,7 @@ CSRF_TRUSTED_ORIGINS = config(
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
-        'rest_framework_simplejwt.authentication.JWTAuthentication',
+        'base_feature_project.authentication.VersionedJWTAuthentication',
     ),
     'DEFAULT_PERMISSION_CLASSES': (
         'rest_framework.permissions.IsAuthenticated',
@@ -142,6 +142,7 @@ SIMPLE_JWT = {
     'ROTATE_REFRESH_TOKENS': True,
     'BLACKLIST_AFTER_ROTATION': True,
     'AUTH_HEADER_TYPES': ('Bearer',),
+    'TOKEN_REFRESH_SERIALIZER': 'base_feature_project.serializers.VersionedTokenRefreshSerializer',
 }
 
 ROOT_URLCONF = 'base_feature_project.urls'

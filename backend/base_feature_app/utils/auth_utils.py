@@ -10,6 +10,13 @@ from base_feature_app.utils.email_utils import (  # noqa: F401
 )
 
 
+def generate_refresh_token(user):
+    """Bind tokens to the account snapshot that authenticated the request."""
+    refresh = RefreshToken.for_user(user)
+    refresh['auth_version'] = user.auth_version
+    return refresh
+
+
 def generate_auth_tokens(user):
     """
     Generate JWT tokens for a user.
@@ -17,7 +24,7 @@ def generate_auth_tokens(user):
     :param user: User instance
     :return: Dictionary with refresh, access tokens and user data
     """
-    refresh = RefreshToken.for_user(user)
+    refresh = generate_refresh_token(user)
 
     return {
         'refresh': str(refresh),
