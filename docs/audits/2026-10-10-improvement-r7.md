@@ -169,6 +169,15 @@ la coordenada explícitamente y se utilizan roles dedicados, gate del proyecto,
 comandos aislados y record-qa sobre el tree real. No se altera el guard del
 toolkit ni se afirma que su preflight pasó.
 
+La auditoría independiente rechazó las aserciones OAuth que miraban sólo la
+primera entrada del log: una segunda entrada insegura podía quedar verde.
+Seguridad corrigió exclusivamente ese test en `723e39fcc8dfa50dc635fa0bb5e5d94da52f4ab8`;
+los cinco casos niegan credencial, URL y cuerpo en toda la captura, además de
+traceback y stack en todas las entradas. Pasaron 5/5, Ruff y gate 100/100.
+Los registros globales de flujos fueron revalidados por el Analyst; un cambio
+posterior sólo de aserciones no altera su semántica aunque la heurística de
+fechas incluya archivos de tests bajo `backend/**/views/*.py`.
+
 Entorno aislado propio: Python 3.12.3 y requisitos del lock de la base; Django
 6.0.8, DRF 3.18 y SimpleJWT 5.5.1. Next 16.3.8, React 19.2.8 y Node 20.20.2.
 Sin archivos `.env` de producción, DB del servicio, migraciones del despliegue
