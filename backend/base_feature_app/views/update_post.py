@@ -15,7 +15,7 @@ from base_feature_app.serializers.update_post_create_update import UpdatePostCre
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def update_post_list(request):
-    queryset = UpdatePost.objects.filter(archived_at__isnull=True)
+    queryset = UpdatePost.objects.filter(archived_at__isnull=True).select_related('shelter')
 
     campaign_id = request.query_params.get('campaign')
     if campaign_id:
