@@ -38,6 +38,8 @@ No se alteran interacciones frontend: `authStore` usa sign-in y la renovación m
 
 Este documento registra decisiones y aceptación, no certifica un SHA por sí mismo. Resultados reales, commits, CI y PR se publican en los PR de la ronda; los artefactos tipados y el ledger se archivan fuera de los worktrees antes de retirarlos.
 
+La primera combinación (`15ea0cc`) aprobó 64 casos, pero QA rechazó su gate por 45 hallazgos Ruff (30 nuevos y 15 preexistentes en los archivos afectados). El gate anterior de seguridad había usado `external-lint=off`; el artifact del [run de CI 38056807663](https://github.com/ProjectAppLabs/tuhuella_project/actions/runs/38056807663) confirmó Ruff ausente y 256 advertencias, pese al check verde. Los dueños corrigen únicamente docstrings, imports y nombres de parametrización exigidos por el gate de estos tests; no cambian casos, aserciones, reglas ni baseline. La versión corregida requiere una nueva aceptación combinada. La ausencia de Ruff en CI queda como limitación abierta: esta ronda lo ejecuta localmente, sin ampliar el alcance a una limpieza del corpus o a cambios del workflow.
+
 ## Pendientes por cupo
 
 1. `I-O-cab1b7d335f3`: excepciones internas de refresh se convierten en 401 y pueden cerrar sesiones durante fallos transitorios.
