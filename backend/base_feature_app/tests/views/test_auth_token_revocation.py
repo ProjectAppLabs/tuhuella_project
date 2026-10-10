@@ -22,6 +22,7 @@ pytestmark = pytest.mark.django_db
 
 @pytest.fixture(autouse=True)
 def isolate_auth_settings(settings):
+    """Keep authentication deterministic with an isolated cache."""
     settings.PASSWORD_HASHERS = ['django.contrib.auth.hashers.MD5PasswordHasher']
     settings.RECAPTCHA_SECRET_KEY = ''
     settings.GOOGLE_OAUTH_CLIENT_ID = 'test-client'
@@ -33,6 +34,7 @@ def isolate_auth_settings(settings):
 
 @pytest.fixture
 def user():
+    """Create an account with the original password."""
     return get_user_model().objects.create_user(
         email='revoked@example.test', password=OLD_PASSWORD,
     )
@@ -40,21 +42,25 @@ def user():
 
 @pytest.fixture
 def current_tokens(user):
+    """Issue versioned tokens before any password operation."""
     return generate_auth_tokens(user)
 
 
 @pytest.fixture
 def legacy_refresh(user):
+    """Issue a refresh token without the version claim."""
     return RefreshToken.for_user(user)
 
 
 @pytest.fixture
 def authenticated_snapshot(user):
+    """Load an authentication snapshot before password revocation."""
     return get_user_model().objects.get(pk=user.pk)
 
 
 @pytest.fixture
 def other_tokens():
+    """Issue tokens for an account unaffected by revocation."""
     other = get_user_model().objects.create_user(
         email='unaffected@example.test', password=OLD_PASSWORD,
     )
@@ -69,6 +75,7 @@ def password_operation(
     request, api_client, user, current_tokens, legacy_refresh,
     authenticated_snapshot, other_tokens,
 ):
+    """Change or reset the password through its public endpoint."""
     endpoint, message = request.param
     PasswordCode.objects.create(user=user, code='123456')
     api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {current_tokens['access']}")
