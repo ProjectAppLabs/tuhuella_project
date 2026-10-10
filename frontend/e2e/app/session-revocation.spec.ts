@@ -38,11 +38,15 @@ test('requires fresh login after another session changes the password', {
   await page.reload();
   await accessRejection;
   await refreshRejection;
-  await expect(page.getByRole('heading', { name: 'Iniciar sesión', exact: true })).toBeVisible();
+  await expect(page.getByText(email, { exact: true })).not.toBeVisible();
+  await expect(page.getByRole('link', { name: 'Iniciar sesión', exact: true })).toBeVisible();
+  // Profile keeps its existing loading state after sign-out. A fresh protected
+  // request must reach the proxy without the revoked session's cookies.
+  await page.goto('/es/my-profile');
+  await expect(page).toHaveURL(/\/sign-in(?:\?|$)/);
   await page.getByLabel('Correo electrónico').fill(email);
   await page.getByLabel('Contraseña', { exact: true }).fill(newPassword);
   await page.getByRole('button', { name: 'Iniciar sesión', exact: true }).click();
-  await expect(page).not.toHaveURL(/\/sign-in/);
-  await page.goto('/es/my-profile');
+  await expect(page).toHaveURL(/\/my-profile$/);
   await expect(page.getByText(email, { exact: true })).toBeVisible();
 });
