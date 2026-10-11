@@ -1,6 +1,11 @@
-from types import SimpleNamespace
+"""Verify update serializers against real optional image libraries."""
+
+from io import BytesIO
 
 import pytest
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django_attachments.models import Attachment, Library
+from PIL import Image
 
 from base_feature_app.serializers.update_post_create_update import (
     UpdatePostCreateUpdateSerializer,
@@ -55,25 +60,38 @@ def test_update_post_create_update_serializer_rejects_missing_title(shelter):
     assert 'title_es' in serializer.errors
 
 
+@pytest.fixture(params=['absent', 'empty', 'populated'])
+def update_image(request, update_post, settings, tmp_path):
+    """Prepare a real optional Library image in private media storage."""
+    settings.MEDIA_ROOT = str(tmp_path)
+    if request.param == 'absent':
+        return update_post, None
+    library = Library.objects.create(title='Update image')
+    update_post.image = library
+    update_post.save(update_fields=['image'])
+    if request.param == 'empty':
+        return update_post, None
+    image_data = BytesIO()
+    Image.new('RGB', (2, 2), 'green').save(image_data, format='PNG')
+    attachment = Attachment.objects.create(
+        library=library, rank=0,
+        file=SimpleUploadedFile('update.png', image_data.getvalue(), 'image/png'),
+    )
+    library.primary_attachment = attachment
+    library.save(update_fields=['primary_attachment'])
+    return update_post, attachment.file.url
+
+
 @pytest.mark.django_db
-def test_update_post_create_update_serializer_image_url_is_null_without_image(update_post):
-    """Read representation sets image_url to null when the post has no image."""
-    data = UpdatePostCreateUpdateSerializer(update_post).data
+@pytest.mark.parametrize('serializer_class', [
+    UpdatePostListSerializer,
+    UpdatePostDetailSerializer,
+    UpdatePostCreateUpdateSerializer,
+])
+def test_update_post_serializer_represents_library_image(serializer_class, update_image):
+    """Image representation follows the real Library/Attachment relationship."""
+    post, expected_url = update_image
 
-    assert data['image_url'] is None
+    data = serializer_class(post).data
 
-
-def test_update_post_create_update_get_image_url_returns_none_when_image_missing():
-    """SerializerMethodField returns None when the instance has no image."""
-    serializer = UpdatePostCreateUpdateSerializer()
-    obj = SimpleNamespace(image=None)
-
-    assert serializer.get_image_url(obj) is None
-
-
-def test_update_post_create_update_get_image_url_returns_url_when_image_present():
-    """SerializerMethodField returns the storage URL when image exposes url."""
-    serializer = UpdatePostCreateUpdateSerializer()
-    obj = SimpleNamespace(image=SimpleNamespace(url='/media/update/photo.jpg'))
-
-    assert serializer.get_image_url(obj) == '/media/update/photo.jpg'
+    assert data['image_url'] == expected_url

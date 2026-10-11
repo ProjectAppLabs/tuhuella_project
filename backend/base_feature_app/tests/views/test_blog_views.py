@@ -1,5 +1,13 @@
+"""Verify public and staff blog endpoints with private editorial media."""
+
+from io import BytesIO
+
 import pytest
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db import DatabaseError, connection
 from django.urls import reverse
+from django_attachments.models import Attachment, Library
+from PIL import Image
 
 from base_feature_app.models import BlogPost
 
@@ -176,6 +184,8 @@ def test_admin_delete_blog_post(admin_client, blog_post):
 @pytest.mark.django_db
 def test_admin_duplicate_blog_post(admin_client, blog_post):
     """Duplicating a post creates a new draft copy."""
+    blog_post.is_featured = True
+    blog_post.save(update_fields=['is_featured'])
     url = reverse('duplicate-blog-post', kwargs={'post_id': blog_post.id})
     response = admin_client.post(url)
 
@@ -183,6 +193,10 @@ def test_admin_duplicate_blog_post(admin_client, blog_post):
     assert response.data['is_published'] is False
     assert '(copia)' in response.data['title_es']
     assert BlogPost.objects.count() == 2
+    copy = BlogPost.objects.get(pk=response.data['id'])
+    assert copy.slug != blog_post.slug
+    assert copy.published_at is None
+    assert copy.is_featured is False
 
 
 @pytest.mark.django_db
@@ -257,6 +271,10 @@ def test_admin_upload_cover_image_requires_file(admin_client, blog_post):
 
     assert response.status_code == 400
     assert 'cover_image' in response.data
+    assert Library.objects.count() == 0
+    assert Attachment.objects.count() == 0
+    blog_post.refresh_from_db()
+    assert blog_post.cover_image_id is None
 
 
 @pytest.mark.django_db
@@ -266,3 +284,220 @@ def test_regular_user_cannot_access_admin_endpoints(authenticated_client):
     response = authenticated_client.get(url)
 
     assert response.status_code == 403
+
+
+@pytest.fixture
+def cover_upload(settings, tmp_path):
+    """Return a fresh valid PNG upload backed by private media storage."""
+    settings.MEDIA_ROOT = str(tmp_path)
+    image_data = BytesIO()
+    Image.new('RGB', (3, 2), 'blue').save(image_data, format='PNG')
+    return SimpleUploadedFile('cover.png', image_data.getvalue(), 'image/png')
+
+
+@pytest.fixture
+def illustrated_blog(blog_post, cover_upload):
+    """Attach an existing illustrated Library for replacement safety tests."""
+    library = Library.objects.create(title='Original cover')
+    attachment = Attachment.objects.create(library=library, rank=0, file=cover_upload)
+    library.primary_attachment = attachment
+    library.save(update_fields=['primary_attachment'])
+    blog_post.cover_image = library
+    blog_post.save(update_fields=['cover_image'])
+    return blog_post
+
+
+@pytest.fixture
+def shared_cover_blog(illustrated_blog, draft_blog_post):
+    """Provide an archived second article referencing the original cover."""
+    from django.utils import timezone
+
+    draft_blog_post.cover_image = illustrated_blog.cover_image
+    draft_blog_post.archived_at = timezone.now()
+    draft_blog_post.save(update_fields=['cover_image', 'archived_at'])
+    return illustrated_blog, draft_blog_post
+
+
+@pytest.fixture
+def editorial_blog(blog_post):
+    """Set non-default bilingual metadata and structured editorial content."""
+    blog_post.author = 'laura-blanco'
+    blog_post.cover_image_credit = 'Photo Author'
+    blog_post.cover_image_credit_url = 'https://example.test/photographer'
+    blog_post.meta_keywords_es = 'adopción,perros'
+    blog_post.meta_keywords_en = 'adoption,dogs'
+    blog_post.content_json_es = {'intro': 'ES', 'sections': [{'heading': 'Original ES'}]}
+    blog_post.content_json_en = {'intro': 'EN', 'sections': [{'heading': 'Original EN'}]}
+    blog_post.sources = [{'name': 'Original source', 'url': 'https://example.test/source'}]
+    blog_post.is_featured = True
+    blog_post.save()
+    return blog_post
+
+
+@pytest.mark.django_db
+def test_admin_upload_cover_persists_library(admin_client, blog_post, cover_upload):
+    """A valid multipart image becomes an Attachment owned by the new cover Library."""
+    expected_bytes = cover_upload.read()
+    cover_upload.seek(0)
+    url = reverse('upload-blog-cover-image', kwargs={'post_id': blog_post.pk})
+
+    response = admin_client.post(url, {'cover_image': cover_upload}, format='multipart')
+
+    assert response.status_code == 200
+    blog_post.refresh_from_db()
+    attachment = blog_post.cover_image.primary_attachment
+    assert response.data['cover_image'] == blog_post.cover_image_id
+    assert response.data['cover_image_display'] == attachment.file.url
+    assert attachment.library_id == blog_post.cover_image_id
+    assert attachment.image_width == 3
+    assert attachment.image_height == 2
+    with attachment.file.open('rb') as stored:
+        assert stored.read() == expected_bytes
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('lang', ['es', 'en'])
+def test_public_blog_represents_uploaded_cover(admin_client, api_client, blog_post, cover_upload, lang):
+    """Public bilingual details expose the persisted uploaded cover URL."""
+    upload_url = reverse('upload-blog-cover-image', kwargs={'post_id': blog_post.pk})
+    uploaded = admin_client.post(upload_url, {'cover_image': cover_upload}, format='multipart')
+    assert uploaded.status_code == 200
+
+    response = api_client.get(reverse('retrieve-blog-post', kwargs={'slug': blog_post.slug}), {'lang': lang})
+
+    assert response.status_code == 200
+    assert response.data['cover_image'] == uploaded.data['cover_image_display']
+    assert response.data['title'] == getattr(blog_post, f'title_{lang}')
+
+
+@pytest.mark.django_db
+def test_admin_upload_cover_rejects_invalid_image(admin_client, blog_post, settings, tmp_path):
+    """Invalid image bytes are rejected before creating rows or files."""
+    settings.MEDIA_ROOT = str(tmp_path)
+    invalid = SimpleUploadedFile('fake.png', b'not an image', 'image/png')
+    url = reverse('upload-blog-cover-image', kwargs={'post_id': blog_post.pk})
+
+    response = admin_client.post(url, {'cover_image': invalid}, format='multipart')
+
+    assert response.status_code == 400
+    assert 'cover_image' in response.data
+    assert Library.objects.count() == 0
+    assert Attachment.objects.count() == 0
+    assert list(tmp_path.rglob('*')) == []
+    blog_post.refresh_from_db()
+    assert blog_post.cover_image_id is None
+
+
+@pytest.mark.django_db
+def test_admin_upload_cover_preserves_shared_previous_library(admin_client, shared_cover_blog):
+    """Replacing a cover leaves archived references and their original file intact."""
+    post, archived = shared_cover_blog
+    old_library = post.cover_image
+    old_attachment = old_library.primary_attachment
+    old_name = old_attachment.file.name
+    with old_attachment.file.open('rb') as stored:
+        image_bytes = stored.read()
+    replacement = SimpleUploadedFile('replacement.png', image_bytes, 'image/png')
+
+    response = admin_client.post(
+        reverse('upload-blog-cover-image', kwargs={'post_id': post.pk}),
+        {'cover_image': replacement}, format='multipart',
+    )
+
+    assert response.status_code == 200
+    post.refresh_from_db()
+    archived.refresh_from_db()
+    assert post.cover_image_id != old_library.pk
+    assert archived.cover_image_id == old_library.pk
+    assert Library.objects.count() == 2
+    assert Attachment.objects.count() == 2
+    assert old_attachment.file.storage.exists(old_name)
+    with old_attachment.file.open('rb') as stored:
+        assert stored.read() == image_bytes
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('failure_table', ['django_attachments_attachment', 'base_feature_app_blogpost'])
+def test_admin_upload_cover_compensates_failed_database_write(
+    admin_client, shared_cover_blog, failure_table, tmp_path,
+):
+    """A database failure after writing new media removes only that request's file."""
+    post, archived = shared_cover_blog
+    old_library_id = post.cover_image_id
+    old_file = post.cover_image.primary_attachment.file
+    with old_file.open('rb') as stored:
+        original_bytes = stored.read()
+    existing_files = sorted(path for path in tmp_path.rglob('*') if path.is_file())
+    replacement = SimpleUploadedFile('replacement.png', original_bytes, 'image/png')
+
+    def fail_database_write(execute, sql, params, many, context):
+        """Raise at the database boundary once the new image has been stored."""
+        if failure_table in sql and sql.lstrip().upper().startswith(('INSERT', 'UPDATE')):
+            raise DatabaseError('Injected private database write failure')
+        return execute(sql, params, many, context)
+
+    with connection.execute_wrapper(fail_database_write):
+        with pytest.raises(DatabaseError, match='Injected private database write failure'):
+            admin_client.post(
+                reverse('upload-blog-cover-image', kwargs={'post_id': post.pk}),
+                {'cover_image': replacement}, format='multipart',
+            )
+
+    post.refresh_from_db()
+    archived.refresh_from_db()
+    assert post.cover_image_id == old_library_id
+    assert archived.cover_image_id == old_library_id
+    assert Library.objects.count() == 1
+    assert Attachment.objects.count() == 1
+    assert sorted(path for path in tmp_path.rglob('*') if path.is_file()) == existing_files
+    with old_file.open('rb') as stored:
+        assert stored.read() == original_bytes
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('endpoint', ['upload-blog-cover-image', 'duplicate-blog-post'])
+def test_editorial_writes_reject_non_staff(authenticated_client, blog_post, cover_upload, endpoint):
+    """Non-staff requests cannot change editorial data or create media."""
+    url = reverse(endpoint, kwargs={'post_id': blog_post.pk})
+
+    response = authenticated_client.post(url, {'cover_image': cover_upload}, format='multipart')
+
+    assert response.status_code == 403
+    assert BlogPost.objects.count() == 1
+    assert Library.objects.count() == 0
+    assert Attachment.objects.count() == 0
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('field', [
+    'author', 'cover_image_credit', 'cover_image_credit_url', 'meta_keywords_es', 'meta_keywords_en',
+])
+def test_duplicate_blog_preserves_editorial_metadata(admin_client, editorial_blog, field):
+    """Duplicating an article preserves this non-default editorial field."""
+    original_value = getattr(editorial_blog, field)
+
+    response = admin_client.post(reverse('duplicate-blog-post', kwargs={'post_id': editorial_blog.pk}))
+
+    assert response.status_code == 201
+    copy = BlogPost.objects.get(pk=response.data['id'])
+    editorial_blog.refresh_from_db()
+    assert response.data[field] == original_value
+    assert getattr(copy, field) == original_value
+    assert getattr(editorial_blog, field) == original_value
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('field', ['content_json_es', 'content_json_en', 'sources'])
+def test_duplicate_blog_content_remains_independent(admin_client, editorial_blog, field):
+    """Editing duplicated structured content leaves the original persisted content unchanged."""
+    original_value = getattr(editorial_blog, field)
+    response = admin_client.post(reverse('duplicate-blog-post', kwargs={'post_id': editorial_blog.pk}))
+    assert response.status_code == 201
+    copy = BlogPost.objects.get(pk=response.data['id'])
+    replacements = {'content_json_es': {}, 'content_json_en': {}, 'sources': []}
+    setattr(copy, field, replacements[field])
+
+    copy.save(update_fields=[field])
+
+    editorial_blog.refresh_from_db()
+    assert getattr(editorial_blog, field) == original_value

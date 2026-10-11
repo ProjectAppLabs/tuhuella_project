@@ -1,6 +1,7 @@
 from rest_framework import serializers
 
 from base_feature_app.models import UpdatePost
+from base_feature_app.serializers.utils import library_primary_url
 from base_feature_app.utils.shelter_access import user_can_manage_shelter
 
 
@@ -38,6 +39,4 @@ class UpdatePostCreateUpdateSerializer(serializers.ModelSerializer):
         }
 
     def get_image_url(self, obj):
-        if obj.image:
-            return obj.image.url
-        return None
+        return library_primary_url(obj.image, default=None)
