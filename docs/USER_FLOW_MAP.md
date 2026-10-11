@@ -6,7 +6,7 @@ Use this document to understand each flow's steps, branching conditions, role re
 
 > **Flow IDs in this document match `e2e/flow-definitions.json` and `e2e/helpers/flow-tags.ts` exactly.**
 
-**Version:** 5.11.1
+**Version:** 5.11.2
 **Last Updated:** 2026-10-10
 
 ---
@@ -1052,23 +1052,23 @@ When the shelter has no `video_url`, the button is not rendered.
 | **Priority** | P3 |
 | **Roles** | shared |
 | **Frontend route** | `/campaigns/[campaignId]` |
-| **API endpoints** | `GET /api/campaigns/[pk]/`, `GET /api/updates/` |
+| **API endpoints** | `GET /api/campaigns/<id>/`, `GET /api/updates/?campaign=<id>&lang=<locale>` |
 
 **Preconditions:** A campaign with status `completed` exists.
 
 **Steps:**
 
-1. Visitor navigates to `/campaigns/[campaignId]` of a completed campaign.
-2. Page loads the campaign via `GET /api/campaigns/[pk]/`.
-3. When `campaign.status === 'completed'`, the progress-updates feed loads via `GET /api/updates/`.
-4. Each update renders its title, body, and image when present.
+1. El visitante abre una campaña completada desde el listado de campañas.
+2. La página carga la campaña; sólo `status === 'completed'` solicita sus actualizaciones.
+3. Cada actualización muestra su título, contenido y, cuando existe, la URL de imagen del adjunto primario de su `Library`.
 
 **Branching conditions:**
 
 | Condition | Behavior |
 |-----------|----------|
 | Campaign not completed | Updates feed hidden |
-| No updates for the campaign | Empty state / feed omitted |
+| No updates for the campaign | Feed omitted |
+| Updates request fails | La interfaz omite el feed sin mostrar el fallo; no acredita error/failure. |
 
 ---
 
@@ -2729,9 +2729,10 @@ When the shelter has no `video_url`, the button is not rendered.
 **Steps:**
 
 1. Desde el listado del blog, el usuario abre la tarjeta del artículo.
-2. Page renders full article with title, content, author, reading time, date.
-3. Reading progress bar tracks scroll position.
-4. Back link returns user to blog listing.
+2. La página muestra título, contenido, autor, tiempo de lectura, fecha y portada persistida, cuando existe.
+3. La portada usa el adjunto primario de la biblioteca y muestra crédito/enlace opcionales.
+4. Reading progress bar tracks scroll position.
+5. Back link returns user to blog listing.
 
 
 **HTML editorial sin contenido estructurado:** se muestra después del saneamiento; conserva texto, formato, imágenes y enlaces seguros. Se eliminan eventos, protocolos ejecutables y contenido activo. Si el saneamiento falla, no se inserta HTML original. Outcomes: `display`, `failure`.
@@ -2790,18 +2791,26 @@ When the shelter has no `video_url`, the button is not rendered.
 | **Priority** | P2 |
 | **Roles** | admin |
 | **Frontend route** | `/admin/blog/[id]/editar` |
-| **API endpoints** | `GET /api/blog/admin/<id>/`, `PUT /api/blog/admin/<id>/update/` |
+| **API endpoints** | `GET /api/blog/admin/<id>/detail/`, `PATCH /api/blog/admin/<id>/update/`, `POST /api/blog/admin/<id>/upload-cover/` |
 
 **Preconditions:** User is authenticated with `admin` role. Blog post with given ID exists.
 
 **Steps:**
 
-1. Admin navigates to `/admin/blog/[id]/editar`.
-2. Form loads existing post data: title, content, JSON content, SEO fields, cover image.
-3. Admin edits fields.
-4. Admin clicks **Update** / **Save**.
-5. Frontend sends `PUT /api/blog/admin/<id>/update/` with updated data.
-6. Blog post updated, success message shown.
+1. El administrador abre el editor desde la fila del artículo en el listado.
+2. El formulario carga campos, contenido JSON, SEO, portada y créditos existentes.
+3. Edita y guarda mediante `PATCH /api/blog/admin/<id>/update/`; el editor muestra el estado guardado.
+4. Puede subir una imagen válida: el multipart crea una `Library` con adjunto primario y devuelve HTTP 200 con `cover_image_display`.
+5. La imagen se conserva al recargar el editor y se muestra en el artículo público ES/EN.
+
+**Branching conditions:**
+
+| Condition | Behavior |
+|-----------|----------|
+| JSON text is invalid | Validación local; no se envía el update. |
+| File is absent or invalid | HTTP 400; el archivo inválido incluye detalle `cover_image`. |
+| Save or upload request fails | El editor conserva el formulario y muestra su mensaje de error. |
+| User is not an admin | Estado de acceso denegado. |
 
 ---
 
@@ -2959,11 +2968,14 @@ When the shelter has no `video_url`, the button is not rendered.
 4. Confirmation dialog appears: "¿Duplicar [title]?"
 5. Admin clicks **Duplicar** to confirm.
 6. Frontend sends `POST /api/blog/admin/<id>/duplicate/`.
-7. New draft post created, list refreshes showing the duplicate.
+7. Se crea un borrador con slug nuevo, sin fecha de publicación y con `is_featured=false`.
+8. Conserva autor, crédito/URL de portada, keywords ES/EN, fuentes y contenido JSON independiente.
+9. El listado muestra la copia; sus metadatos se conservan al abrir y recargar el editor.
 
 **Branching:**
 
 - If admin clicks **Cancelar** → dialog closes, no duplication.
+- Si la solicitud es rechazada o falla, el listado actualmente no captura el error: el diálogo permanece sin mensaje de fallo. Se registra como límite; no se amplían los outcomes declarados.
 
 ---
 
