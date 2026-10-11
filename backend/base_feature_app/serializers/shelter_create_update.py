@@ -7,7 +7,6 @@ from django_attachments.models import Library, Attachment
 
 class ShelterCreateUpdateSerializer(serializers.ModelSerializer):
     website = serializers.URLField(required=False, allow_blank=True)
-    video = serializers.FileField(required=False, allow_null=True)
     cover_image_upload = serializers.ImageField(required=False, allow_null=True, write_only=True)
 
     class Meta:
